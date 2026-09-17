@@ -1,6 +1,6 @@
 databases:
   - name: crypto-bot-db
-    plan: starter
+    plan: basic-256mb
     databaseName: crypto_bot
     user: crypto_bot_user
 
