@@ -1,0 +1,34 @@
+databases:
+  - name: crypto-bot-db
+    plan: starter
+    databaseName: crypto_bot
+    user: crypto_bot_user
+
+services:
+  - type: worker
+    name: crypto-bot-engine
+    env: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python -m backend.main"
+    envVars:
+      - key: BINANCE_API_KEY
+        sync: false
+      - key: BINANCE_API_SECRET
+        sync: false
+      - key: USE_TESTNET
+        value: "true"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: STARTING_BALANCE
+        value: "100"
+      - key: MIN_RISK_USD
+        value: "5"
+      - key: SYMBOLS
+        value: "BTC/USDT,ETH/USDT"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: crypto-bot-db
+          property: connectionString
