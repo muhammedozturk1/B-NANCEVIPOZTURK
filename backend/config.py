@@ -118,3 +118,26 @@ NEWS_BLACKOUT_MINUTES_AFTER = 30
 # HEARTBEAT
 # ----------------------------------------------------------------------
 HEARTBEAT_INTERVAL_MINUTES = 30
+
+# ----------------------------------------------------------------------
+# FAZ 2 - STOP LOSS MESAFESİ (ATR çarpanı, motor bazlı)
+# ----------------------------------------------------------------------
+SL_ATR_MULTIPLIER = {
+    "scalp": 1.2,   # dar stop, hızlı işlem
+    "day": 1.8,
+    "swing": 2.5,   # geniş stop, gürültüye takılmasın
+}
+
+# ----------------------------------------------------------------------
+# SMC / LİKİDİTE / DESTEK-DİRENÇ PARAMETRELERİ
+# ----------------------------------------------------------------------
+SWING_LOOKBACK = 3            # fractal swing high/low tespiti için sağ-sol mum sayısı
+LIQUIDITY_EQUAL_TOLERANCE = 0.0015   # eşit tepe/dip kabul toleransı (%0.15)
+SR_PROXIMITY_THRESHOLD = 0.002       # fiyatın S/R seviyesine "yakın" sayılma mesafesi (%0.2)
+
+# ----------------------------------------------------------------------
+# KORKU-AÇGÖZLÜLÜK ENDEKSİ (Fear & Greed Index)
+# ----------------------------------------------------------------------
+FEAR_GREED_API_URL = "https://api.alternative.me/fng/?limit=1"
+FEAR_GREED_EXTREME_FEAR = 25    # bu değerin altı -> aşırı korku (contrarian long)
+FEAR_GREED_EXTREME_GREED = 75   # bu değerin üstü -> aşırı açgözlülük (contrarian short)

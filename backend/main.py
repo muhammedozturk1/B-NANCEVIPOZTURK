@@ -1,51 +1,78 @@
 """
-FAZ 1 - TEST SCRIPTİ
+FAZ 2 - ANA ÇALIŞMA DÖNGÜSÜ
 
-Bu aşamada henüz gerçek/testnet işlem AÇILMIYOR. Bu script sadece:
-  1) Binance Testnet bağlantısının çalıştığını
-  2) Veritabanının kurulduğunu
-  3) EMA ve VWAP göstergelerinin doğru hesaplandığını
-doğrulamak için var. İşlem açma mantığı Faz 2'de (engines/) eklenecek.
+Faz 1'deki "bir kere çalışıp kapanan" test scriptinin yerini alıyor.
+Artık bot sürekli çalışır ve 3 motoru kendi zaman dilimlerine göre
+periyodik olarak tetikler:
+  - Scalp: her 1 dakikada bir kontrol
+  - Day:   her 15 dakikada bir kontrol
+  - Swing: her 4 saatte bir kontrol
+
+Render worker artık bir kere çalışıp kapanmayacak, sürekli ayakta kalacak.
 """
 import logging
+from apscheduler.schedulers.blocking import BlockingScheduler
+
 from backend import config
-from backend.exchange.binance_client import BinanceClient
 from backend.db.database import init_db
-from backend.strategies import ema, vwap
+from backend.exchange.binance_client import BinanceClient
+from backend.engines import scalp, day, swing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("main")
 
 
-def run_phase1_check():
-    logger.info("=== FAZ 1 BAĞLANTI TESTİ BAŞLIYOR ===")
+def run_engine_safely(engine_module, client):
+    """Bir motorda hata olsa bile diğer motorları ve zamanlayıcıyı etkilememesi için sarmalayıcı."""
+    try:
+        engine_module.run(client)
+    except Exception as e:
+        logger.error(f"{engine_module.ENGINE_NAME} motorunda beklenmeyen hata: {e}")
 
-    # 1) Veritabanı
+
+def startup_checks(client) -> bool:
+    """Bot başlamadan önce temel bağlantıları doğrular (Faz 1'deki testin aynısı)."""
+    logger.info("=== BAŞLANGIÇ KONTROLLERİ ===")
     init_db()
     logger.info("✅ Veritabanı tabloları hazır.")
 
-    # 2) Binance bağlantısı
-    client = BinanceClient()
     try:
         balance = client.get_usdt_balance()
         logger.info(f"✅ Binance bağlantısı OK. Testnet USDT bakiyesi: {balance}")
     except Exception as e:
         logger.error(f"❌ Binance bağlantı hatası: {e}")
-        logger.error("Kontrol et: .env dosyasındaki API key/secret doğru mu? Testnet API key mi?")
+        return False
+
+    logger.info(f"İzlenen pariteler: {config.SYMBOLS}")
+    logger.info("=== KONTROLLER TAMAMLANDI, BOT ÇALIŞMAYA BAŞLIYOR ===")
+    return True
+
+
+def main():
+    client = BinanceClient()
+
+    if not startup_checks(client):
+        logger.error("Başlangıç kontrolleri başarısız, bot durduruluyor.")
         return
 
-    # 3) Göstergeler
-    for symbol in config.SYMBOLS:
-        try:
-            candles = client.fetch_ohlcv(symbol, timeframe="15m", limit=100)
-            ema_signal = ema.get_signal(candles)
-            vwap_signal = vwap.get_signal(candles)
-            logger.info(f"📊 {symbol} | EMA: {ema_signal['direction']} | VWAP: {vwap_signal['direction']}")
-        except Exception as e:
-            logger.error(f"❌ {symbol} veri çekilemedi: {e}")
+    scheduler = BlockingScheduler(timezone="UTC")
 
-    logger.info("=== FAZ 1 TESTİ TAMAMLANDI ===")
+    scheduler.add_job(run_engine_safely, "interval", minutes=1,
+                       args=[scalp, client], id="scalp_engine")
+    scheduler.add_job(run_engine_safely, "interval", minutes=15,
+                       args=[day, client], id="day_engine")
+    scheduler.add_job(run_engine_safely, "interval", hours=4,
+                       args=[swing, client], id="swing_engine")
+
+    logger.info("Zamanlayıcı başlatıldı: Scalp(1dk) / Day(15dk) / Swing(4sa)")
+
+    # İlk çalıştırmada hemen bir kez tetikle, sonra periyodik devam etsin
+    run_engine_safely(scalp, client)
+    run_engine_safely(day, client)
+    run_engine_safely(swing, client)
+
+    scheduler.start()
 
 
 if __name__ == "__main__":
-    run_phase1_check()
+    main()
