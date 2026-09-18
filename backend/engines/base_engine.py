@@ -12,7 +12,7 @@ import logging
 from backend import config
 from backend.db import repository
 from backend.db.models import TradeStatus
-from backend.risk import position_sizing
+from backend.risk import position_sizing, kill_switch, correlation, news_filter
 from backend.strategies import ema, vwap, smc, liquidity, support_resistance, fear_greed
 from backend.telegram import notifier
 
@@ -84,8 +84,18 @@ def check_mtf_confirmation(side: str, confirm_candles: list) -> bool:
 def run_cycle(engine_name: str, client):
     """Bir motor için tek bir kontrol döngüsü: tüm sembolleri tarar, uygun olan(lar)da işlem açar."""
 
+    kill_switch.reactivate_engine_if_pause_expired(engine_name)
+
+    if kill_switch.is_global_kill_switch_active():
+        logger.warning(f"[{engine_name}] 🛑 GENEL KILL-SWITCH AKTİF - bugün yeni işlem açılmayacak.")
+        return
+
     if not repository.is_engine_active(engine_name):
         logger.info(f"[{engine_name}] motor duraklatılmış durumda, bu döngü atlanıyor.")
+        return
+
+    if news_filter.is_news_blackout_active():
+        logger.info(f"[{engine_name}] 📰 haber blackout aktif, yeni işlem açılmayacak.")
         return
 
     open_count = repository.count_open_positions(engine_name)
@@ -138,6 +148,10 @@ def _open_trade(engine_name: str, symbol: str, side: str, entry_candles: list, e
     if not position_sizing.check_margin_sufficient(sizing["required_margin_usd"], current_balance):
         logger.warning(f"[{engine_name}] {symbol}: yetersiz marj, işlem açılamadı. "
                         f"Gereken: {sizing['required_margin_usd']}$, Mevcut: {current_balance}$")
+        return
+
+    if not correlation.check_correlation_limit(symbol, side, sizing["risk_usd"], current_balance):
+        logger.info(f"[{engine_name}] {symbol}: korelasyon limiti nedeniyle işlem açılmadı.")
         return
 
     client.set_leverage(symbol, leverage)
