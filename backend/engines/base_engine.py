@@ -142,15 +142,19 @@ def _open_trade(engine_name: str, symbol: str, side: str, entry_candles: list, e
     stop_loss = entry_price - atr * sl_multiplier if side == "buy" else entry_price + atr * sl_multiplier
     tp_prices = position_sizing.calculate_tp_prices(engine_name, entry_price, stop_loss, side)
 
-    current_balance = client.get_usdt_balance()
-    sizing = position_sizing.calculate_position_size(engine_name, entry_price, stop_loss, current_balance, leverage)
+    # Risk hesaplamaları (pozisyon büyüklüğü, korelasyon) SANAL kasaya göre yapılır.
+    # Gerçek borsa bakiyesi sadece "marj fiziken yeterli mi" kontrolü için kullanılır.
+    virtual_balance = repository.get_virtual_balance()
+    exchange_balance = client.get_usdt_balance()
 
-    if not position_sizing.check_margin_sufficient(sizing["required_margin_usd"], current_balance):
+    sizing = position_sizing.calculate_position_size(engine_name, entry_price, stop_loss, virtual_balance, leverage)
+
+    if not position_sizing.check_margin_sufficient(sizing["required_margin_usd"], exchange_balance):
         logger.warning(f"[{engine_name}] {symbol}: yetersiz marj, işlem açılamadı. "
-                        f"Gereken: {sizing['required_margin_usd']}$, Mevcut: {current_balance}$")
+                        f"Gereken: {sizing['required_margin_usd']}$, Borsa bakiyesi: {exchange_balance}$")
         return
 
-    if not correlation.check_correlation_limit(symbol, side, sizing["risk_usd"], current_balance):
+    if not correlation.check_correlation_limit(symbol, side, sizing["risk_usd"], virtual_balance):
         logger.info(f"[{engine_name}] {symbol}: korelasyon limiti nedeniyle işlem açılmadı.")
         return
 
