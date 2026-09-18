@@ -40,6 +40,11 @@ def calculate_position_size(engine: str, entry_price: float, stop_loss_price: fl
     Risk tutarını, giriş ve stop mesafesine bölerek pozisyon miktarını (coin adedi) hesaplar.
     Kaldıraç, işlem büyüklüğünü DEĞİL, gereken teminatı etkiler - risk her zaman sabit $ bazlıdır.
     Bu, "kaldıraç yüksek diye daha fazla risk almış olma" hatasını engeller.
+
+    GÜVENLİK TAVANI: Eğer hesaplanan pozisyon, kasanın MAX_MARGIN_PERCENT_PER_TRADE'ini
+    aşan bir marj istiyorsa (örn. dar stop mesafesi yüzünden), pozisyon büyüklüğü bu
+    tavana sığacak şekilde otomatik küçültülür. Bu durumda gerçek risk, MIN_RISK_USD'nin
+    altına da düşebilir - küçük kasada güvenlik, sabit risk tutarından önce gelir.
     """
     risk_usd = calculate_risk_amount(engine, current_balance)
     stop_distance = abs(entry_price - stop_loss_price)
@@ -49,9 +54,19 @@ def calculate_position_size(engine: str, entry_price: float, stop_loss_price: fl
 
     # Kaç coin alırsak, stop'a çarpınca tam olarak risk_usd kaybederiz
     position_amount = risk_usd / stop_distance
-
     position_value = position_amount * entry_price
     required_margin = position_value / leverage
+
+    max_margin = current_balance * config.MAX_MARGIN_PERCENT_PER_TRADE
+    capped = False
+
+    if required_margin > max_margin and required_margin > 0:
+        scale = max_margin / required_margin
+        position_amount *= scale
+        position_value *= scale
+        risk_usd *= scale  # gerçek risk de orantılı küçülür
+        required_margin = max_margin
+        capped = True
 
     return {
         "risk_usd": round(risk_usd, 2),
@@ -59,6 +74,7 @@ def calculate_position_size(engine: str, entry_price: float, stop_loss_price: fl
         "position_value_usd": round(position_value, 2),
         "required_margin_usd": round(required_margin, 2),
         "leverage": leverage,
+        "capped_by_margin_limit": capped,
     }
 
 
