@@ -18,6 +18,7 @@ from backend.db.database import init_db
 from backend.exchange.binance_client import BinanceClient
 from backend.engines import scalp, day, swing
 from backend.risk import position_monitor
+from backend.telegram import notifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("main")
@@ -36,6 +37,20 @@ def run_position_monitor_safely(client):
         position_monitor.run_monitor_cycle(client)
     except Exception as e:
         logger.error(f"Pozisyon izleme döngüsünde hata: {e}")
+
+
+def run_heartbeat_safely():
+    try:
+        notifier.send_heartbeat()
+    except Exception as e:
+        logger.error(f"Heartbeat gönderilirken hata: {e}")
+
+
+def run_weekly_summary_safely():
+    try:
+        notifier.send_weekly_summary()
+    except Exception as e:
+        logger.error(f"Haftalık özet gönderilirken hata: {e}")
 
 
 def startup_checks(client) -> bool:
@@ -57,6 +72,7 @@ def startup_checks(client) -> bool:
     position_monitor.reconcile_positions_on_startup(client)
 
     logger.info("=== KONTROLLER TAMAMLANDI, BOT ÇALIŞMAYA BAŞLIYOR ===")
+    notifier.send_heartbeat()
     return True
 
 
@@ -78,9 +94,15 @@ def main():
     scheduler.add_job(run_position_monitor_safely, "interval",
                        seconds=config.POSITION_MONITOR_INTERVAL_SECONDS,
                        args=[client], id="position_monitor")
+    scheduler.add_job(run_heartbeat_safely, "interval",
+                       minutes=config.HEARTBEAT_INTERVAL_MINUTES, id="heartbeat")
+    scheduler.add_job(run_weekly_summary_safely, "cron",
+                       day_of_week=config.WEEKLY_SUMMARY_DAY_OF_WEEK,
+                       hour=config.WEEKLY_SUMMARY_HOUR_UTC, id="weekly_summary")
 
     logger.info(f"Zamanlayıcı başlatıldı: Scalp(1dk) / Day(15dk) / Swing(4sa) / "
-                f"Pozisyon İzleme({config.POSITION_MONITOR_INTERVAL_SECONDS}sn)")
+                f"Pozisyon İzleme({config.POSITION_MONITOR_INTERVAL_SECONDS}sn) / "
+                f"Heartbeat({config.HEARTBEAT_INTERVAL_MINUTES}dk) / Haftalık Özet(Pzt {config.WEEKLY_SUMMARY_HOUR_UTC}:00 UTC)")
 
     # İlk çalıştırmada hemen bir kez tetikle, sonra periyodik devam etsin
     run_engine_safely(scalp, client)
