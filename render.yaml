@@ -30,8 +30,25 @@ services:
         value: "100"
       - key: MIN_RISK_USD
         value: "5"
-      - key: SYMBOLS
-        value: "BTC/USDT,ETH/USDT"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: crypto-bot-db
+          property: connectionString
+
+  - type: web
+    name: crypto-bot-dashboard
+    env: python
+    region: frankfurt
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn backend.dashboard.api:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: USE_TESTNET
+        value: "true"
+      - key: STARTING_BALANCE
+        value: "100"
       - key: DATABASE_URL
         fromDatabase:
           name: crypto-bot-db
