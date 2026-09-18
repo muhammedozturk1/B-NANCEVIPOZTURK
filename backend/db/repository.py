@@ -2,7 +2,7 @@
 Trade ve EngineState tabloları için tekrar kullanılabilir veritabanı işlemleri.
 Böylece engine kodları SQLAlchemy detaylarıyla uğraşmaz, sade fonksiyon çağırır.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from backend import config
 from backend.db.database import get_session
 from backend.db.models import Trade, EngineState, TradeStatus, BotCapital
@@ -24,6 +24,41 @@ def has_open_position(engine: str, symbol: str) -> bool:
         return session.query(Trade).filter(
             Trade.engine == engine, Trade.symbol == symbol, Trade.status == TradeStatus.OPEN
         ).first() is not None
+    finally:
+        session.close()
+
+
+def has_open_position_any_engine(symbol: str) -> bool:
+    """
+    KRİTİK GÜVENLİK KONTROLÜ: Herhangi bir motorun (scalp/day/swing fark etmez)
+    bu sembolde açık pozisyonu var mı? Binance'te pozisyonlar sembol bazında
+    NETLEŞTİĞİ için, 3 motor birbirinden habersiz aynı sembole girerse bunlar
+    borsada tek, çok daha büyük bir pozisyona dönüşür - marj tavanı her motor
+    için ayrı ayrı doğru hesaplansa bile toplamda kontrolsüz büyür. Bu yüzden
+    yeni işlem açmadan önce TÜM motorlar için kontrol edilir.
+    """
+    session = get_session()
+    try:
+        return session.query(Trade).filter(
+            Trade.symbol == symbol, Trade.status == TradeStatus.OPEN
+        ).first() is not None
+    finally:
+        session.close()
+
+
+def is_symbol_in_cooldown(symbol: str) -> bool:
+    """Bu sembolde son SYMBOL_COOLDOWN_MINUTES içinde kapanmış bir işlem var mı?
+    Varsa hızlı ardışık aç/kapa döngülerini önlemek için yeni işlem engellenir."""
+    session = get_session()
+    try:
+        cutoff = datetime.utcnow() - timedelta(minutes=config.SYMBOL_COOLDOWN_MINUTES)
+        recent = session.query(Trade).filter(
+            Trade.symbol == symbol,
+            Trade.status != TradeStatus.OPEN,
+            Trade.closed_at.isnot(None),
+            Trade.closed_at >= cutoff,
+        ).first()
+        return recent is not None
     finally:
         session.close()
 
