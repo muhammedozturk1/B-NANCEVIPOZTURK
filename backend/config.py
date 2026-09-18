@@ -98,9 +98,21 @@ ENGINE_TIMEFRAMES = {
 }
 
 # ----------------------------------------------------------------------
-# İZLENECEK PARİTELER
+# DİNAMİK PİYASA TARAMASI (sabit coin listesi YOK)
 # ----------------------------------------------------------------------
-SYMBOLS = os.getenv("SYMBOLS", "BTC/USDT,ETH/USDT").split(",")
+# Bot, hangi coin'lerde işlem yapacağını kendisi seçer: her tarama
+# periyodunda Binance Futures'taki TÜM USDT paritelerinden, hacim ve
+# likidite kriterlerine uyan en aktif N tanesini otomatik seçer.
+QUOTE_CURRENCY = "USDT"
+TOP_SYMBOLS_COUNT = 25              # taranacak en aktif parite sayısı
+MIN_24H_VOLUME_USDT = 20_000_000    # bu hacmin altındaki pariteler elenir (likidite riski)
+SYMBOL_CACHE_TTL_SECONDS = 1800     # tarama listesi 30 dakikada bir yenilenir (her cycle'da değil)
+
+# Stablecoin'e karşı stablecoin işlemi anlamsız, bu bazlar hiç taranmaz
+EXCLUDE_BASE_ASSETS = {"USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP"}
+
+# API/tarama başarısız olursa geriye düşülecek son çare liste (asla boş kalmasın diye)
+FALLBACK_SYMBOLS = ["BTC/USDT", "ETH/USDT"]
 
 # Korelasyonu yüksek kabul edilen parite grupları (aynı yönde toplam maruziyet kontrolü için)
 CORRELATED_GROUPS = [
