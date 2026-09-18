@@ -17,6 +17,7 @@ from backend import config
 from backend.db.database import init_db
 from backend.exchange.binance_client import BinanceClient
 from backend.engines import scalp, day, swing
+from backend.risk import position_monitor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("main")
@@ -28,6 +29,13 @@ def run_engine_safely(engine_module, client):
         engine_module.run(client)
     except Exception as e:
         logger.error(f"{engine_module.ENGINE_NAME} motorunda beklenmeyen hata: {e}")
+
+
+def run_position_monitor_safely(client):
+    try:
+        position_monitor.run_monitor_cycle(client)
+    except Exception as e:
+        logger.error(f"Pozisyon izleme döngüsünde hata: {e}")
 
 
 def startup_checks(client) -> bool:
@@ -44,6 +52,10 @@ def startup_checks(client) -> bool:
         return False
 
     logger.info(f"İzlenen pariteler: {config.SYMBOLS}")
+
+    # FAZ 3: Bağlantı koptuktan sonra yeniden başlarsak, borsa ile DB'yi senkronize et
+    position_monitor.reconcile_positions_on_startup(client)
+
     logger.info("=== KONTROLLER TAMAMLANDI, BOT ÇALIŞMAYA BAŞLIYOR ===")
     return True
 
@@ -63,8 +75,12 @@ def main():
                        args=[day, client], id="day_engine")
     scheduler.add_job(run_engine_safely, "interval", hours=4,
                        args=[swing, client], id="swing_engine")
+    scheduler.add_job(run_position_monitor_safely, "interval",
+                       seconds=config.POSITION_MONITOR_INTERVAL_SECONDS,
+                       args=[client], id="position_monitor")
 
-    logger.info("Zamanlayıcı başlatıldı: Scalp(1dk) / Day(15dk) / Swing(4sa)")
+    logger.info(f"Zamanlayıcı başlatıldı: Scalp(1dk) / Day(15dk) / Swing(4sa) / "
+                f"Pozisyon İzleme({config.POSITION_MONITOR_INTERVAL_SECONDS}sn)")
 
     # İlk çalıştırmada hemen bir kez tetikle, sonra periyodik devam etsin
     run_engine_safely(scalp, client)

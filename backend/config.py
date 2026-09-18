@@ -141,3 +141,33 @@ SR_PROXIMITY_THRESHOLD = 0.002       # fiyatın S/R seviyesine "yakın" sayılma
 FEAR_GREED_API_URL = "https://api.alternative.me/fng/?limit=1"
 FEAR_GREED_EXTREME_FEAR = 25    # bu değerin altı -> aşırı korku (contrarian long)
 FEAR_GREED_EXTREME_GREED = 75   # bu değerin üstü -> aşırı açgözlülük (contrarian short)
+
+# ----------------------------------------------------------------------
+# FAZ 3 - POZİSYON BÜYÜKLÜĞÜ GÜVENLİK TAVANI
+# ----------------------------------------------------------------------
+# Tek bir işlem, kasanın bu yüzdesinden fazla marj istemesin (küçük kasada
+# aşırı büyük pozisyon açılmasını engeller - $100 kasada $87 marj istemek gibi
+# durumları önler). Gerekirse pozisyon büyüklüğü bu sınıra göre küçültülür.
+MAX_MARGIN_PERCENT_PER_TRADE = 0.20  # kasanın %20'si
+
+# ----------------------------------------------------------------------
+# FAZ 3 - HABER/MAKRO FİLTRESİ
+# ----------------------------------------------------------------------
+# ForexFactory'nin herkese açık haftalık takvim JSON'u (birçok açık kaynak
+# bot bunu kullanır). Yüksek etkili USD haberlerinden 30dk önce/sonra yeni
+# işlem açılmaz (mevcut açık işlemler etkilenmez).
+NEWS_CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+NEWS_HIGH_IMPACT_ONLY = True
+NEWS_RELEVANT_CURRENCIES = {"USD"}
+
+# ----------------------------------------------------------------------
+# FAZ 3 - BREAKEVEN / MOMENTUM KAYBI / POZİSYON İZLEME
+# ----------------------------------------------------------------------
+POSITION_MONITOR_INTERVAL_SECONDS = 30
+
+# Fiyat, TP2'ye giden yoldaki en iyi noktadan bu oranın üzerinde geri
+# çekilirse (kâr vermeden), pozisyon momentum kaybı nedeniyle kapatılır.
+MOMENTUM_REVERSAL_RETRACE_PERCENT = 0.40
+
+# Bu kadar mumluk geçmiş, "en iyi favorable fiyatı" hesaplamak için taranır
+MOMENTUM_LOOKBACK_CANDLES = 30
