@@ -15,6 +15,7 @@ from backend.db.models import TradeStatus
 from backend.risk import position_sizing, kill_switch, correlation, news_filter
 from backend.strategies import ema, vwap, smc, liquidity, support_resistance, fear_greed
 from backend.telegram import notifier
+from backend.exchange import symbol_scanner
 
 logger = logging.getLogger("base_engine")
 
@@ -101,7 +102,9 @@ def run_cycle(engine_name: str, client):
     open_count = repository.count_open_positions(engine_name)
     max_positions = config.MAX_CONCURRENT_POSITIONS[engine_name]
 
-    for symbol in config.SYMBOLS:
+    active_symbols = symbol_scanner.get_active_symbols(client)
+
+    for symbol in active_symbols:
         try:
             if open_count >= max_positions:
                 logger.info(f"[{engine_name}] maksimum eşzamanlı pozisyon limitine ulaşıldı ({max_positions}).")
