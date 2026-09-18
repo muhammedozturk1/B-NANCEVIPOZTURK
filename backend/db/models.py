@@ -45,6 +45,8 @@ class Trade(Base):
     confluence_score = Column(Integer, nullable=False)     # kaç teknik onay verdi
     strategies_used = Column(String, nullable=False)        # "ema,vwap,smc" gibi virgüllü liste
 
+    telegram_message_id = Column(Integer, nullable=True)   # açılış bildirim mesajı - reply-thread için
+
     opened_at = Column(DateTime, server_default=func.now())
     closed_at = Column(DateTime, nullable=True)
 
@@ -70,3 +72,21 @@ class DailyPnL(Base):
     starting_balance = Column(Float, nullable=False)
     realized_pnl = Column(Float, default=0)
     kill_switch_triggered = Column(Boolean, default=False)
+
+
+class BotCapital(Base):
+    """
+    Botun kendi SANAL kasası (virtual balance).
+
+    Testnet'teki gerçek borsa bakiyesi (binlerce $ olabilir) yerine, risk
+    hesaplamaları (pozisyon büyüklüğü, kill-switch, korelasyon limiti) bu
+    tabloda tutulan, config.STARTING_BALANCE'tan (varsayılan $100) başlayan
+    sanal bakiyeye göre yapılır. Gerçek borsa bakiyesi sadece "marj yeterli
+    mi" kontrolü için kullanılır. Bu, canlıya geçişte de aynı mantıkla
+    çalışacağı için tutarlı bir tasarımdır.
+    """
+    __tablename__ = "bot_capital"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    balance = Column(Float, nullable=False)
+    updated_at = Column(DateTime, onupdate=func.now(), server_default=func.now())
