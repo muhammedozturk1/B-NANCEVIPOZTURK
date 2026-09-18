@@ -4,6 +4,10 @@ Testnet / canlı geçişi tek bir config değişkeni (USE_TESTNET) ile yapılır
 Tüm borsa işlemleri bu sınıf üzerinden geçer -> ileride başka borsa eklemek
 istersek sadece bu dosyayı değiştiririz, strateji kodlarına dokunmayız.
 """
+import time
+import hmac
+import hashlib
+import requests
 import ccxt
 import logging
 from backend import config
@@ -22,9 +26,13 @@ class BinanceClient:
 
         if config.USE_TESTNET:
             self.exchange.set_sandbox_mode(True)
+            self.base_url = "https://testnet.binancefuture.com"
             logger.info("Binance TESTNET modunda başlatıldı.")
         else:
+            self.base_url = "https://fapi.binance.com"
             logger.warning("Binance CANLI modda başlatıldı - gerçek para kullanılıyor!")
+
+        self.exchange.load_markets()  # algo order isteklerinde sembol dönüşümü (BTC/USDT -> BTCUSDT) için gerekli
 
     # ------------------------------------------------------------------
     # PİYASA VERİSİ
@@ -59,6 +67,66 @@ class BinanceClient:
             logger.error(f"Kaldıraç ayarlanamadı ({symbol}, {leverage}x): {e}")
 
     # ------------------------------------------------------------------
+    # ALGO ORDER API (SL/TP) - Binance'in Aralık 2025'te zorunlu kıldığı yeni sistem
+    # ------------------------------------------------------------------
+    # ÖNEMLİ: Binance, Aralık 2025'ten itibaren STOP_MARKET/TAKE_PROFIT_MARKET gibi
+    # koşullu emirleri eski /fapi/v1/order endpoint'inden KABUL ETMİYOR (hata -4120).
+    # Bu emirler artık ayrı bir "Algo Order" servisi (/fapi/v1/algoOrder) üzerinden
+    # gönderilmeli. ccxt'nin unified create_order() metodu henüz bunu desteklemediği
+    # için, bu emirleri DOĞRUDAN (ccxt'yi atlayarak) imzalı HTTP isteğiyle gönderiyoruz.
+    def _signed_algo_request(self, method: str, path: str, params: dict):
+        params = dict(params)
+        params["timestamp"] = int(time.time() * 1000)
+        query_string = "&".join(f"{k}={v}" for k, v in params.items())
+        signature = hmac.new(
+            config.BINANCE_API_SECRET.encode(), query_string.encode(), hashlib.sha256
+        ).hexdigest()
+        params["signature"] = signature
+        headers = {"X-MBX-APIKEY": config.BINANCE_API_KEY}
+        url = f"{self.base_url}{path}"
+
+        response = requests.request(method, url, params=params, headers=headers, timeout=10)
+        if not response.ok:
+            logger.error(f"Algo order isteği başarısız ({response.status_code}): {response.text}")
+        response.raise_for_status()
+        return response.json()
+
+    def _place_algo_stop_order(self, symbol: str, entry_side: str, amount: float,
+                                trigger_price: float, order_type: str):
+        """order_type: 'STOP_MARKET' veya 'TAKE_PROFIT_MARKET'."""
+        close_side = "SELL" if entry_side == "buy" else "BUY"
+        market_symbol = self.exchange.market(symbol)["id"]  # 'BTC/USDT' -> 'BTCUSDT'
+
+        params = {
+            "algoType": "CONDITIONAL",
+            "symbol": market_symbol,
+            "side": close_side,
+            "type": order_type,
+            "triggerPrice": trigger_price,
+            "quantity": amount,
+            "reduceOnly": "true",
+            "workingType": "MARK_PRICE",
+        }
+        return self._signed_algo_request("POST", "/fapi/v1/algoOrder", params)
+
+    def get_open_algo_orders(self, symbol: str) -> list:
+        market_symbol = self.exchange.market(symbol)["id"]
+        result = self._signed_algo_request("GET", "/fapi/v1/openAlgoOrders", {"symbol": market_symbol})
+        return result if isinstance(result, list) else result.get("data", [])
+
+    def cancel_algo_order(self, algo_id):
+        return self._signed_algo_request("DELETE", "/fapi/v1/algoOrder", {"algoId": algo_id})
+
+    def cancel_open_stop_orders(self, symbol: str):
+        """Bu sembol için açık tüm SL/TP (algo) emirlerini iptal eder."""
+        try:
+            orders = self.get_open_algo_orders(symbol)
+            for order in orders:
+                self.cancel_algo_order(order["algoId"])
+        except Exception as e:
+            logger.error(f"{symbol}: açık algo emirleri iptal edilemedi: {e}")
+
+    # ------------------------------------------------------------------
     # POZİSYON AÇMA / KAPAMA
     # ------------------------------------------------------------------
     def open_position(self, symbol: str, side: str, amount: float,
@@ -76,23 +144,17 @@ class BinanceClient:
         logger.info(f"Pozisyon açıldı: {symbol} {side} {amount}")
 
         if stop_loss:
-            self._place_stop_order(symbol, side, amount, stop_loss, order_type="stop_market")
+            try:
+                self._place_algo_stop_order(symbol, side, amount, stop_loss, order_type="STOP_MARKET")
+            except Exception as e:
+                logger.error(f"❌ {symbol}: Stop-loss emri KONULAMADI, pozisyon korumasız! Hata: {e}")
         if take_profit:
-            self._place_stop_order(symbol, side, amount, take_profit, order_type="take_profit_market")
+            try:
+                self._place_algo_stop_order(symbol, side, amount, take_profit, order_type="TAKE_PROFIT_MARKET")
+            except Exception as e:
+                logger.error(f"❌ {symbol}: Take-profit emri konulamadı: {e}")
 
         return order
-
-    def _place_stop_order(self, symbol: str, entry_side: str, amount: float,
-                           trigger_price: float, order_type: str):
-        # SL/TP emirleri pozisyonun tersi yönde kapanış emri olarak girilir
-        close_side = "sell" if entry_side == "buy" else "buy"
-        return self.exchange.create_order(
-            symbol=symbol,
-            type=order_type,
-            side=close_side,
-            amount=amount,
-            params={"stopPrice": trigger_price, "reduceOnly": True},
-        )
 
     def close_position(self, symbol: str, side: str, amount: float):
         close_side = "sell" if side == "buy" else "buy"
@@ -105,15 +167,9 @@ class BinanceClient:
         )
 
     def update_stop_loss(self, symbol: str, side: str, amount: float, new_stop_price: float):
-        """Breakeven / trailing stop için mevcut SL'yi iptal edip yenisini koyar."""
+        """Breakeven / trailing stop için mevcut SL/TP algo emirlerini iptal edip yeni SL koyar."""
         self.cancel_open_stop_orders(symbol)
-        return self._place_stop_order(symbol, side, amount, new_stop_price, order_type="stop_market")
-
-    def cancel_open_stop_orders(self, symbol: str):
-        open_orders = self.exchange.fetch_open_orders(symbol)
-        for o in open_orders:
-            if o["type"] in ("stop_market", "take_profit_market"):
-                self.exchange.cancel_order(o["id"], symbol)
+        return self._place_algo_stop_order(symbol, side, amount, new_stop_price, order_type="STOP_MARKET")
 
     # ------------------------------------------------------------------
     # DİNAMİK PİYASA TARAMASI
