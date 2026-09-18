@@ -115,9 +115,8 @@ NEWS_BLACKOUT_MINUTES_BEFORE = 30
 NEWS_BLACKOUT_MINUTES_AFTER = 30
 
 # ----------------------------------------------------------------------
-# HEARTBEAT
+# HEARTBEAT - detaylar Faz 4 bölümünde tanımlı
 # ----------------------------------------------------------------------
-HEARTBEAT_INTERVAL_MINUTES = 30
 
 # ----------------------------------------------------------------------
 # FAZ 2 - STOP LOSS MESAFESİ (ATR çarpanı, motor bazlı)
@@ -171,3 +170,17 @@ MOMENTUM_REVERSAL_RETRACE_PERCENT = 0.40
 
 # Bu kadar mumluk geçmiş, "en iyi favorable fiyatı" hesaplamak için taranır
 MOMENTUM_LOOKBACK_CANDLES = 30
+
+# ----------------------------------------------------------------------
+# FAZ 4 - TELEGRAM BİLDİRİMLERİ
+# ----------------------------------------------------------------------
+TELEGRAM_API_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
+# Bot her X dakikada bir "hâlâ çalışıyorum" mesajı gönderir. Bu mesajlar
+# kesilirse (Telegram'da uzun süre sessizlik olursa) bot çökmüş demektir -
+# harici bir izleme servisi olmadan en basit ve güvenilir "hayattayım" sinyali budur.
+HEARTBEAT_INTERVAL_MINUTES = 30
+
+# Haftalık performans özeti ne zaman gönderilsin (UTC)
+WEEKLY_SUMMARY_DAY_OF_WEEK = "mon"
+WEEKLY_SUMMARY_HOUR_UTC = 9
