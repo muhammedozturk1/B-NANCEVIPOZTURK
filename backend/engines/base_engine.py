@@ -110,8 +110,11 @@ def run_cycle(engine_name: str, client):
                 logger.info(f"[{engine_name}] maksimum eşzamanlı pozisyon limitine ulaşıldı ({max_positions}).")
                 break
 
-            if repository.has_open_position(engine_name, symbol):
-                continue  # bu sembolde zaten açık pozisyon var
+            if repository.has_open_position_any_engine(symbol):
+                continue  # bu sembolde HERHANGİ bir motorun zaten açık pozisyonu var
+
+            if repository.is_symbol_in_cooldown(symbol):
+                continue  # bu sembol yakın zamanda kapandı, soğuma süresinde
 
             timeframes = config.ENGINE_TIMEFRAMES[engine_name]
             entry_candles = client.fetch_ohlcv(symbol, timeframes["entry"], limit=200)
