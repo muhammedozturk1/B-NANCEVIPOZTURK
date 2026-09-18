@@ -1,0 +1,55 @@
+databases:
+  - name: crypto-bot-db
+    plan: basic-256mb
+    region: frankfurt
+    databaseName: crypto_bot
+    user: crypto_bot_user
+
+services:
+  - type: worker
+    name: crypto-bot-engine
+    env: python
+    region: frankfurt
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python -m backend.main"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: BINANCE_API_KEY
+        sync: false
+      - key: BINANCE_API_SECRET
+        sync: false
+      - key: USE_TESTNET
+        value: "true"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: STARTING_BALANCE
+        value: "100"
+      - key: MIN_RISK_USD
+        value: "5"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: crypto-bot-db
+          property: connectionString
+
+  - type: web
+    name: crypto-bot-dashboard
+    env: python
+    region: frankfurt
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn backend.dashboard.api:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: USE_TESTNET
+        value: "true"
+      - key: STARTING_BALANCE
+        value: "100"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: crypto-bot-db
+          property: connectionString

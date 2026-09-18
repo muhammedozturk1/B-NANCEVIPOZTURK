@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crypto Bot Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3;
+    --muted: #8b949e; --green: #3fb950; --red: #f85149; --blue: #58a6ff; --yellow: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap:10px; margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; }
+  .card .label { color:var(--muted); font-size:12px; margin-bottom:4px; }
+  .card .value { font-size:20px; font-weight:600; }
+  .green { color:var(--green); } .red { color:var(--red); } .blue { color:var(--blue); }
+  .panel { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:16px; }
+  .panel-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px; }
+  select, button { background:#21262d; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:13px; cursor:pointer; }
+  button.active { background:var(--blue); color:#0d1117; font-weight:600; }
+  #chart, #cumChart { width:100%; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:500; }
+  .badge { padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; }
+  .badge.open { background:#1f6feb33; color:var(--blue); }
+  .badge.tp1, .badge.tp2 { background:#3fb95033; color:var(--green); }
+  .badge.sl { background:#f8514933; color:var(--red); }
+  .badge.be { background:#d2992233; color:var(--yellow); }
+  .engine-tag { font-size:11px; color:var(--muted); }
+  .exit-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
+  .exit-engine h4 { margin:0 0 6px; font-size:13px; color:var(--blue); }
+  .exit-row { display:flex; justify-content:space-between; font-size:13px; padding:2px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🤖 Crypto Bot Dashboard</h1>
+
+  <div class="cards" id="summaryCards"></div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <select id="symbolSelect"></select>
+        <select id="timeframeSelect">
+          <option value="1m">1dk</option>
+          <option value="15m" selected>15dk</option>
+          <option value="1h">1sa</option>
+          <option value="4h">4sa</option>
+          <option value="1d">1g</option>
+        </select>
+      </div>
+    </div>
+    <div id="chart"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <strong>Kümülatif PnL</strong>
+      <div>
+        <button data-period="daily" class="active">Günlük</button>
+        <button data-period="weekly">Haftalık</button>
+        <button data-period="monthly">Aylık</button>
+      </div>
+    </div>
+    <div id="cumChart" style="height:200px;"></div>
+  </div>
+
+  <div class="panel">
+    <strong>TP1 / TP2 / BE / Stop Dağılımı (Motor Bazlı)</strong>
+    <div class="exit-grid" id="exitBreakdown" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="panel">
+    <strong>İşlemler</strong>
+    <table id="tradesTable">
+      <thead><tr><th>Motor</th><th>Sembol</th><th>Yön</th><th>Giriş</th><th>Durum</th><th>PnL</th><th>Tarih</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const fmt$ = (n) => (n === null || n === undefined) ? '-' : '$' + Number(n).toFixed(2);
+const colorPnl = (n) => n > 0 ? 'green' : (n < 0 ? 'red' : '');
+
+async function loadSummary() {
+  const r = await fetch('/api/summary'); const s = await r.json();
+  const el = document.getElementById('summaryCards');
+  el.innerHTML = `
+    <div class="card"><div class="label">Başlangıç Kasa</div><div class="value">${fmt$(s.starting_balance)}</div></div>
+    <div class="card"><div class="label">Güncel Kasa (Sanal)</div><div class="value blue">${fmt$(s.current_balance)}</div></div>
+    <div class="card"><div class="label">Açık K/Z</div><div class="value ${colorPnl(s.open_pnl)}">${fmt$(s.open_pnl)}</div></div>
+    <div class="card"><div class="label">Kapalı K/Z</div><div class="value ${colorPnl(s.closed_pnl)}">${fmt$(s.closed_pnl)}</div></div>
+    <div class="card"><div class="label">Açık Pozisyon</div><div class="value">${s.open_positions_count}</div></div>
+  `;
+}
+
+async function loadSymbols() {
+  const r = await fetch('/api/symbols'); const symbols = await r.json();
+  const sel = document.getElementById('symbolSelect');
+  sel.innerHTML = symbols.map(s => `<option value="${s}">${s}</option>`).join('');
+}
+
+let chart, candleSeries, priceLines = [];
+function initChart() {
+  chart = LightweightCharts.createChart(document.getElementById('chart'), {
+    height: 400,
+    layout: { background: { color: '#161b22' }, textColor: '#e6edf3' },
+    grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+    timeScale: { timeVisible: true, secondsVisible: false },
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#3fb950', downColor: '#f85149', borderVisible: false,
+    wickUpColor: '#3fb950', wickDownColor: '#f85149',
+  });
+}
+
+async function loadChart() {
+  const symbol = document.getElementById('symbolSelect').value;
+  const timeframe = document.getElementById('timeframeSelect').value;
+  if (!symbol) return;
+
+  const r = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&limit=200`);
+  const candles = await r.json();
+  if (candles.error) return;
+  candleSeries.setData(candles);
+
+  priceLines.forEach(pl => candleSeries.removePriceLine(pl));
+  priceLines = [];
+
+  const tr = await fetch(`/api/trades?status=all`);
+  const trades = (await tr.json()).filter(t => t.symbol === symbol).slice(0, 5);
+
+  const markers = [];
+  trades.forEach(t => {
+    const entryTime = Math.floor(new Date(t.opened_at).getTime() / 1000);
+    markers.push({ time: entryTime, position: t.side === 'buy' ? 'belowBar' : 'aboveBar',
+                   color: t.side === 'buy' ? '#3fb950' : '#f85149',
+                   shape: t.side === 'buy' ? 'arrowUp' : 'arrowDown',
+                   text: `${t.engine} giriş` });
+    if (t.exit_price) {
+      const exitTime = Math.floor(new Date(t.closed_at).getTime() / 1000);
+      markers.push({ time: exitTime, position: 'inBar', color: '#d29922', shape: 'circle', text: t.status });
+    }
+    if (t.status === 'open') {
+      priceLines.push(candleSeries.createPriceLine({ price: t.stop_loss, color: '#f85149', lineWidth: 1, lineStyle: 2, title: 'SL' }));
+      priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_1, color: '#3fb950', lineWidth: 1, lineStyle: 2, title: 'TP1' }));
+      priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_2, color: '#3fb950', lineWidth: 1, lineStyle: 0, title: 'TP2' }));
+    }
+  });
+  candleSeries.setMarkers(markers.sort((a,b) => a.time - b.time));
+}
+
+let cumChart, cumSeries;
+async function loadCumulative(period='daily') {
+  const r = await fetch(`/api/cumulative?period=${period}`); const data = await r.json();
+  if (!cumChart) {
+    cumChart = LightweightCharts.createChart(document.getElementById('cumChart'), {
+      height: 200,
+      layout: { background: { color: '#161b22' }, textColor: '#e6edf3' },
+      grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+      timeScale: { timeVisible: false },
+    });
+    cumSeries = cumChart.addLineSeries({ color: '#58a6ff', lineWidth: 2 });
+  }
+  const points = data.map((d, i) => ({ time: i + 1, value: d.cumulative }));
+  cumSeries.setData(points);
+}
+
+async function loadExitBreakdown() {
+  const r = await fetch('/api/exit-breakdown'); const data = await r.json();
+  const el = document.getElementById('exitBreakdown');
+  const engines = ['scalp', 'day', 'swing'];
+  const labels = { closed_tp1: 'TP1', closed_tp2: 'TP2', closed_sl: 'Stop', closed_be: 'Breakeven', closed_manual: 'Erken Kapama' };
+  el.innerHTML = engines.map(eng => {
+    const stats = data[eng] || {};
+    const rows = Object.keys(labels).map(k => `<div class="exit-row"><span>${labels[k]}</span><strong>${stats[k] || 0}</strong></div>`).join('');
+    return `<div class="exit-engine"><h4>${eng.toUpperCase()}</h4>${rows}</div>`;
+  }).join('');
+}
+
+async function loadTrades() {
+  const r = await fetch('/api/trades?status=all'); const trades = await r.json();
+  const tbody = document.querySelector('#tradesTable tbody');
+  tbody.innerHTML = trades.slice(0, 50).map(t => `
+    <tr>
+      <td class="engine-tag">${t.engine}</td>
+      <td>${t.symbol}</td>
+      <td>${t.side === 'buy' ? '🟢 Long' : '🔴 Short'}</td>
+      <td>${t.entry_price?.toFixed(4) ?? '-'}</td>
+      <td><span class="badge ${t.status.replace('closed_','')}">${t.status}</span></td>
+      <td class="${colorPnl(t.pnl_usd)}">${fmt$(t.pnl_usd)}</td>
+      <td>${t.opened_at ? new Date(t.opened_at).toLocaleString('tr-TR') : '-'}</td>
+    </tr>`).join('');
+}
+
+document.querySelectorAll('[data-period]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-period]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadCumulative(btn.dataset.period);
+  });
+});
+document.getElementById('symbolSelect').addEventListener('change', loadChart);
+document.getElementById('timeframeSelect').addEventListener('change', loadChart);
+
+async function init() {
+  initChart();
+  await loadSymbols();
+  await Promise.all([loadSummary(), loadChart(), loadCumulative(), loadExitBreakdown(), loadTrades()]);
+  setInterval(() => { loadSummary(); loadTrades(); }, 30000);
+  setInterval(loadChart, 60000);
+}
+init();
+</script>
+</body>
+</html>
