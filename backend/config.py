@@ -114,6 +114,11 @@ EXCLUDE_BASE_ASSETS = {"USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP"}
 # API/tarama başarısız olursa geriye düşülecek son çare liste (asla boş kalmasın diye)
 FALLBACK_SYMBOLS = ["BTC/USDT", "ETH/USDT"]
 
+# Bir sembolde işlem kapandıktan sonra, aynı sembolde (hangi motor olursa olsun)
+# yeni işlem açılmadan önce beklenmesi gereken süre. Hızlı ardışık aç/kapa
+# döngülerini (whipsaw) ve istenmeyen pozisyon birikmesini engeller.
+SYMBOL_COOLDOWN_MINUTES = 5
+
 # Korelasyonu yüksek kabul edilen parite grupları (aynı yönde toplam maruziyet kontrolü için)
 CORRELATED_GROUPS = [
     {"BTC/USDT", "ETH/USDT"},
