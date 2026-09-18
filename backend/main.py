@@ -66,7 +66,8 @@ def startup_checks(client) -> bool:
         logger.error(f"❌ Binance bağlantı hatası: {e}")
         return False
 
-    logger.info(f"İzlenen pariteler: {config.SYMBOLS}")
+    logger.info(f"Tarama modu: DİNAMİK (sabit liste yok) - en aktif {config.TOP_SYMBOLS_COUNT} "
+                f"parite, min. hacim: {config.MIN_24H_VOLUME_USDT:,.0f}$")
 
     # FAZ 3: Bağlantı koptuktan sonra yeniden başlarsak, borsa ile DB'yi senkronize et
     position_monitor.reconcile_positions_on_startup(client)
