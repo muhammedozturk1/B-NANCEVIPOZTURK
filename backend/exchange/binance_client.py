@@ -116,6 +116,41 @@ class BinanceClient:
                 self.exchange.cancel_order(o["id"], symbol)
 
     # ------------------------------------------------------------------
+    # DİNAMİK PİYASA TARAMASI
+    # ------------------------------------------------------------------
+    def fetch_top_symbols(self, limit: int, min_volume: float, quote: str = "USDT",
+                           exclude_base_assets: set = None) -> list:
+        """
+        Binance Futures'taki tüm <quote> paritelerini 24s hacme göre sıralar,
+        minimum hacim ve dışlanan bazları (stablecoin'ler vb.) filtreleyip
+        en aktif <limit> tanesini döner. Sabit bir coin listesi YOKTUR -
+        piyasa hangi coin'lerde hareketliyse bot oraya bakar.
+        """
+        exclude_base_assets = exclude_base_assets or set()
+        tickers = self.exchange.fetch_tickers()
+
+        candidates = []
+        seen = set()
+        for raw_symbol, ticker in tickers.items():
+            base_symbol = raw_symbol.split(":")[0]  # 'BTC/USDT:USDT' -> 'BTC/USDT'
+            if not base_symbol.endswith(f"/{quote}") or base_symbol in seen:
+                continue
+
+            base_asset = base_symbol.split("/")[0]
+            if base_asset in exclude_base_assets:
+                continue
+
+            volume = ticker.get("quoteVolume") or 0
+            if volume < min_volume:
+                continue
+
+            seen.add(base_symbol)
+            candidates.append((base_symbol, volume))
+
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return [symbol for symbol, _ in candidates[:limit]]
+
+    # ------------------------------------------------------------------
     # SENKRONİZASYON (bağlantı koptuktan sonra state kurtarma)
     # ------------------------------------------------------------------
     def fetch_open_positions(self):
