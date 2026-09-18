@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Crypto Bot Dashboard</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root {
     --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3;
@@ -211,12 +211,25 @@ document.querySelectorAll('[data-period]').forEach(btn => {
 document.getElementById('symbolSelect').addEventListener('change', loadChart);
 document.getElementById('timeframeSelect').addEventListener('change', loadChart);
 
+async function safe(fn, label) {
+  try { await fn(); } catch (e) { console.error(`${label} yüklenemedi:`, e); }
+}
+
 async function init() {
-  initChart();
-  await loadSymbols();
-  await Promise.all([loadSummary(), loadChart(), loadCumulative(), loadExitBreakdown(), loadTrades()]);
-  setInterval(() => { loadSummary(); loadTrades(); }, 30000);
-  setInterval(loadChart, 60000);
+  await safe(loadSummary, 'Özet');
+  await safe(loadSymbols, 'Semboller');
+  try {
+    initChart();
+    await safe(loadChart, 'Grafik');
+  } catch (e) {
+    console.error('Grafik kütüphanesi başlatılamadı:', e);
+  }
+  await safe(() => loadCumulative(), 'Kümülatif PnL');
+  await safe(loadExitBreakdown, 'Dağılım');
+  await safe(loadTrades, 'İşlemler');
+
+  setInterval(() => { safe(loadSummary); safe(loadTrades); }, 30000);
+  setInterval(() => safe(loadChart), 60000);
 }
 init();
 </script>
