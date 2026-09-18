@@ -2,7 +2,6 @@ ccxt==4.3.87
 pandas==2.2.2
 SQLAlchemy==2.0.30
 python-dotenv==1.0.1
-python-telegram-bot==21.3
 APScheduler==3.10.4
 requests==2.32.3
 psycopg2-binary==2.9.9
