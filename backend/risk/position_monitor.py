@@ -70,16 +70,13 @@ def _handle_trade_closed(trade: Trade, client):
     status = _guess_close_status(trade, exit_price)
 
     repository.close_trade(trade.id, exit_price, pnl_usd, status)
+    new_virtual_balance = repository.update_virtual_balance(pnl_usd)
 
-    try:
-        current_balance = client.get_usdt_balance()
-    except Exception:
-        current_balance = trade.entry_price  # son çare, kill-switch hesaplamasını bozmasın diye kabaca
-
-    kill_switch.record_realized_pnl(pnl_usd, current_balance)
+    kill_switch.record_realized_pnl(pnl_usd, new_virtual_balance - pnl_usd)
     kill_switch.record_engine_trade_result(trade.engine, is_win=(pnl_usd > 0))
 
-    logger.info(f"[{trade.engine}] 📌 İşlem kapandı: {trade.symbol} {status.value} | PnL: {pnl_usd:.2f}$")
+    logger.info(f"[{trade.engine}] 📌 İşlem kapandı: {trade.symbol} {status.value} | PnL: {pnl_usd:.2f}$ "
+                f"| Sanal kasa: {new_virtual_balance:.2f}$")
     notifier.send_trade_update(trade, status.value)
 
 
@@ -144,12 +141,9 @@ def _check_momentum_reversal(trade: Trade, candles: list, client):
 
         pnl_usd = _estimate_pnl(trade, current_price)
         repository.close_trade(trade.id, current_price, pnl_usd, TradeStatus.CLOSED_MANUAL)
+        new_virtual_balance = repository.update_virtual_balance(pnl_usd)
 
-        try:
-            current_balance = client.get_usdt_balance()
-        except Exception:
-            current_balance = trade.entry_price
-        kill_switch.record_realized_pnl(pnl_usd, current_balance)
+        kill_switch.record_realized_pnl(pnl_usd, new_virtual_balance - pnl_usd)
         kill_switch.record_engine_trade_result(trade.engine, is_win=(pnl_usd > 0))
 
         logger.info(f"[{trade.engine}] ⚠️ {trade.symbol}: momentum kaybı nedeniyle erken kapatıldı "
