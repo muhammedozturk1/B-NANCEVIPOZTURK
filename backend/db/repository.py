@@ -3,8 +3,9 @@ Trade ve EngineState tabloları için tekrar kullanılabilir veritabanı işleml
 Böylece engine kodları SQLAlchemy detaylarıyla uğraşmaz, sade fonksiyon çağırır.
 """
 from datetime import datetime
+from backend import config
 from backend.db.database import get_session
-from backend.db.models import Trade, EngineState, TradeStatus
+from backend.db.models import Trade, EngineState, TradeStatus, BotCapital
 
 
 def count_open_positions(engine: str) -> int:
@@ -86,3 +87,60 @@ def is_engine_active(engine: str) -> bool:
             return True  # duraklama süresi doldu, tekrar aktif sayılabilir
         return False
     return state.is_active
+
+
+# ------------------------------------------------------------------
+# SANAL KASA (VIRTUAL BALANCE)
+# ------------------------------------------------------------------
+def get_virtual_balance() -> float:
+    """Botun risk hesaplamalarında kullandığı sanal kasayı döner (yoksa STARTING_BALANCE ile oluşturur)."""
+    session = get_session()
+    try:
+        capital = session.query(BotCapital).first()
+        if not capital:
+            capital = BotCapital(balance=config.STARTING_BALANCE)
+            session.add(capital)
+            session.commit()
+            session.refresh(capital)
+        return capital.balance
+    finally:
+        session.close()
+
+
+def update_virtual_balance(pnl_usd: float) -> float:
+    """Bir işlem kapandığında sanal kasaya kâr/zararı işler, yeni bakiyeyi döner."""
+    session = get_session()
+    try:
+        capital = session.query(BotCapital).first()
+        if not capital:
+            capital = BotCapital(balance=config.STARTING_BALANCE)
+            session.add(capital)
+        capital.balance += pnl_usd
+        session.commit()
+        session.refresh(capital)
+        return capital.balance
+    finally:
+        session.close()
+
+
+# ------------------------------------------------------------------
+# TELEGRAM MESAJ ID (reply-thread güncellemeleri için)
+# ------------------------------------------------------------------
+def set_telegram_message_id(trade_id: int, message_id: int):
+    session = get_session()
+    try:
+        trade = session.query(Trade).filter(Trade.id == trade_id).first()
+        if trade:
+            trade.telegram_message_id = message_id
+            session.commit()
+    finally:
+        session.close()
+
+
+def get_trades_since(since_datetime) -> list:
+    """Haftalık özet raporu için, belirli bir tarihten sonra AÇILAN tüm işlemleri döner."""
+    session = get_session()
+    try:
+        return session.query(Trade).filter(Trade.opened_at >= since_datetime).all()
+    finally:
+        session.close()
