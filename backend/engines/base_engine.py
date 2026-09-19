@@ -145,7 +145,8 @@ def _open_trade(engine_name: str, symbol: str, side: str, entry_candles: list, e
     entry_price = entry_candles[-1][4]
     sl_multiplier = config.SL_ATR_MULTIPLIER[engine_name]
 
-    stop_loss = entry_price - atr * sl_multiplier if side == "buy" else entry_price + atr * sl_multiplier
+    stop_distance = position_sizing.calculate_stop_distance(entry_price, atr, sl_multiplier)
+    stop_loss = entry_price - stop_distance if side == "buy" else entry_price + stop_distance
     tp_prices = position_sizing.calculate_tp_prices(engine_name, entry_price, stop_loss, side)
 
     # Risk hesaplamaları (pozisyon büyüklüğü, korelasyon) SANAL kasaya göre yapılır.
