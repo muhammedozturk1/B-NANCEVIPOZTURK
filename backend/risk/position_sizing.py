@@ -17,6 +17,18 @@ def calculate_atr(ohlcv: list, period: int = 14) -> float:
     return float(atr.iloc[-1])
 
 
+def calculate_stop_distance(entry_price: float, atr: float, multiplier: float) -> float:
+    """
+    Stop mesafesini ATR*çarpan olarak hesaplar, ancak MIN_STOP_DISTANCE_PERCENT
+    tabanının altına düşmesine izin vermez. Bu taban özellikle düşük fiyatlı/
+    oynak (meme coin tarzı) paritelerde ATR'nin yanıltıcı derecede küçük
+    çıktığı durumlarda, işlemin açılır açılmaz anında TP/SL'e çarpmasını önler.
+    """
+    atr_based_distance = atr * multiplier
+    min_distance = entry_price * config.MIN_STOP_DISTANCE_PERCENT
+    return max(atr_based_distance, min_distance)
+
+
 def choose_leverage(ohlcv: list) -> int:
     """ATR/fiyat oranına göre otomatik kaldıraç seçimi."""
     atr = calculate_atr(ohlcv)
