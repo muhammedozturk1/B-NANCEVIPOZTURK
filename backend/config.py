@@ -40,7 +40,7 @@ CAPITAL_ALLOCATION = {
 }
 
 # İşlem başına risk: max(MIN_RISK_USD, kasa * RISK_PERCENT)
-MIN_RISK_USD = float(os.getenv("MIN_RISK_USD", "5"))
+MIN_RISK_USD = float(os.getenv("MIN_RISK_USD", "10"))
 RISK_PERCENT_PER_TRADE = {
     "scalp": 0.015,   # %1.5
     "day": 0.02,      # %2
@@ -104,8 +104,9 @@ ENGINE_TIMEFRAMES = {
 # periyodunda Binance Futures'taki TÜM USDT paritelerinden, hacim ve
 # likidite kriterlerine uyan en aktif N tanesini otomatik seçer.
 QUOTE_CURRENCY = "USDT"
-TOP_SYMBOLS_COUNT = 25              # taranacak en aktif parite sayısı
-MIN_24H_VOLUME_USDT = 20_000_000    # bu hacmin altındaki pariteler elenir (likidite riski)
+TOP_SYMBOLS_COUNT = 15               # önceki 25 çok genişti, kalite için azaltıldı
+MIN_24H_VOLUME_USDT = 100_000_000    # önceki 20M çok düşüktü - meme/mikro-cap coinleri de kabul ediyordu,
+                                       # bunlarda fiyat saniyeler içinde aşırı sıçrayıp anında TP/SL'e çarpıyordu
 SYMBOL_CACHE_TTL_SECONDS = 1800     # tarama listesi 30 dakikada bir yenilenir (her cycle'da değil)
 
 # Stablecoin'e karşı stablecoin işlemi anlamsız, bu bazlar hiç taranmaz
@@ -143,6 +144,11 @@ SL_ATR_MULTIPLIER = {
     "day": 1.8,
     "swing": 2.5,   # geniş stop, gürültüye takılmasın
 }
+
+# GÜVENLİK TABANI: ATR çok küçük çıksa bile (düşük volatilite algılanan an, veya
+# hesaplama hatası), stop/TP mesafesi girişin bu yüzdesinden daha yakın olamaz.
+# Bu, "işlem açılır açılmaz anında TP veya stop olma" sorununu önler.
+MIN_STOP_DISTANCE_PERCENT = 0.004  # giriş fiyatının en az %0.4'ü kadar mesafe
 
 # ----------------------------------------------------------------------
 # SMC / LİKİDİTE / DESTEK-DİRENÇ PARAMETRELERİ
