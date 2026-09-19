@@ -83,7 +83,7 @@ ENGINE_STRATEGIES = {
     "swing": ["smc", "liquidity_zones", "support_resistance", "fear_greed"],
 }
 CONFLUENCE_THRESHOLD = {
-    "scalp": 2,   # 3 teknikten en az 2'si aynı yönde onay vermeli
+    "scalp": 3,   # önceki 2/3 çok gevşekti (%33 kazanma oranı) - artık 3 teknikten HEPSİ aynı yönde onay vermeli
     "day": 3,     # 4 teknikten en az 3'ü
     "swing": 3,   # 4 teknikten en az 3'ü
 }
@@ -139,7 +139,7 @@ NEWS_BLACKOUT_MINUTES_AFTER = 30
 # FAZ 2 - STOP LOSS MESAFESİ (ATR çarpanı, motor bazlı)
 # ----------------------------------------------------------------------
 SL_ATR_MULTIPLIER = {
-    "scalp": 1.2,   # dar stop, hızlı işlem
+    "scalp": 1.8,   # önceki 1.2 çok dardı, 1dk grafikte normal gürültüye bile takılıyordu
     "day": 1.8,
     "swing": 2.5,   # geniş stop, gürültüye takılmasın
 }
