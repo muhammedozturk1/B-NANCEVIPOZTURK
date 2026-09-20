@@ -58,16 +58,63 @@ def _guess_close_status(trade: Trade, exit_price: float) -> TradeStatus:
     return min(candidates, key=lambda status: abs(candidates[status] - exit_price))
 
 
+def _determine_close_outcome(trade: Trade, client):
+    """
+    Pozisyonun GERÇEKTEN hangi emirle (TP mi SL mi) ve hangi fiyattan kapandığını
+    Binance'in algo emir kayıtlarından sorgular. Tahmine dayalı eski yöntemin
+    (en yakın fiyat seviyesini bulma) yanlış sınıflandırma yaptığı durumları çözer.
+
+    Dönüş: (outcome, actual_price) -> outcome: "tp" | "sl" | None (belirsizse)
+    """
+    tp_filled_price = None
+    sl_filled_price = None
+
+    if trade.tp_algo_id:
+        try:
+            tp_order = client.get_algo_order(trade.tp_algo_id)
+            if tp_order.get("algoStatus") == "FINISHED":
+                price = float(tp_order.get("actualPrice") or 0)
+                tp_filled_price = price if price > 0 else trade.take_profit_1
+        except Exception as e:
+            logger.warning(f"TP algo emri sorgulanamadı ({trade.tp_algo_id}): {e}")
+
+    if trade.sl_algo_id:
+        try:
+            sl_order = client.get_algo_order(trade.sl_algo_id)
+            if sl_order.get("algoStatus") == "FINISHED":
+                price = float(sl_order.get("actualPrice") or 0)
+                sl_filled_price = price if price > 0 else trade.stop_loss
+        except Exception as e:
+            logger.warning(f"SL algo emri sorgulanamadı ({trade.sl_algo_id}): {e}")
+
+    if tp_filled_price is not None:
+        return "tp", tp_filled_price
+    if sl_filled_price is not None:
+        return "sl", sl_filled_price
+    return None, None
+
+
 def _handle_trade_closed(trade: Trade, client):
-    try:
-        ticker = client.fetch_ticker(trade.symbol)
-        exit_price = ticker["last"]
-    except Exception as e:
-        logger.error(f"[{trade.engine}] {trade.symbol}: kapanış fiyatı alınamadı, entry fiyat kullanılacak: {e}")
-        exit_price = trade.entry_price
+    outcome, actual_price = _determine_close_outcome(trade, client)
+
+    if outcome == "tp":
+        exit_price = actual_price
+        status = TradeStatus.CLOSED_TP1  # şu an tek TP emri var, her zaman TP1 seviyesinde
+    elif outcome == "sl":
+        exit_price = actual_price
+        # Breakeven sonrası SL, girişe çekilmiş SL'dir -> bu gerçekte "breakeven'da kapandı" demektir
+        status = TradeStatus.CLOSED_BE if trade.moved_to_breakeven else TradeStatus.CLOSED_SL
+    else:
+        # Gerçek emir durumu belirlenemedi (örn. eski algo_id'siz kayıt) -> eski tahmine dayalı yönteme düş
+        try:
+            ticker = client.fetch_ticker(trade.symbol)
+            exit_price = ticker["last"]
+        except Exception as e:
+            logger.error(f"[{trade.engine}] {trade.symbol}: kapanış fiyatı alınamadı, entry fiyat kullanılacak: {e}")
+            exit_price = trade.entry_price
+        status = _guess_close_status(trade, exit_price)
 
     pnl_usd = _estimate_pnl(trade, exit_price)
-    status = _guess_close_status(trade, exit_price)
 
     repository.close_trade(trade.id, exit_price, pnl_usd, status)
     new_virtual_balance = repository.update_virtual_balance(pnl_usd)
@@ -91,7 +138,7 @@ def _check_breakeven(trade: Trade, current_price: float, client):
         return
 
     try:
-        client.update_stop_loss(trade.symbol, trade.side, trade.amount, trade.entry_price)
+        new_sl_algo_id = client.update_stop_loss(trade.symbol, trade.side, trade.amount, trade.entry_price)
     except Exception as e:
         logger.error(f"[{trade.engine}] {trade.symbol}: breakeven'a çekilemedi: {e}")
         return
@@ -101,6 +148,7 @@ def _check_breakeven(trade: Trade, current_price: float, client):
         db_trade = session.query(Trade).filter(Trade.id == trade.id).first()
         if db_trade:
             db_trade.moved_to_breakeven = True
+            db_trade.sl_algo_id = new_sl_algo_id  # ÖNEMLİ: eski SL iptal oldu, yeni ID'yi takip etmeliyiz
             session.commit()
     finally:
         session.close()
@@ -133,7 +181,7 @@ def _check_momentum_reversal(trade: Trade, candles: list, client):
 
     if retrace_ratio >= config.MOMENTUM_REVERSAL_RETRACE_PERCENT:
         try:
-            client.cancel_open_stop_orders(trade.symbol)
+            client.cancel_all_algo_orders(trade.symbol)
             client.close_position(trade.symbol, trade.side, trade.amount)
         except Exception as e:
             logger.error(f"[{trade.engine}] {trade.symbol}: momentum kaybı kapatması başarısız: {e}")

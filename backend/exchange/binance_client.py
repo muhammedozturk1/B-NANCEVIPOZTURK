@@ -93,7 +93,15 @@ class BinanceClient:
 
     def _place_algo_stop_order(self, symbol: str, entry_side: str, amount: float,
                                 trigger_price: float, order_type: str):
-        """order_type: 'STOP_MARKET' veya 'TAKE_PROFIT_MARKET'."""
+        """
+        order_type: 'STOP_MARKET' veya 'TAKE_PROFIT'.
+
+        NOT: Take-profit'i bilinçli olarak LIMIT tipinde (TAKE_PROFIT, MARKET değil)
+        gönderiyoruz - bu, hedefe ulaşıldığında MARKET emrin yaratacağı olumsuz
+        slippage'ı (kazancın hedefin biraz gerisinde gerçekleşmesini) önler. Stop-loss
+        ise garantili çıkış önceliği taşıdığı için MARKET tipinde kalır (fiyat kaymasını
+        göze alarak da olsa pozisyondan kesin çıkmak, hiç çıkamamaktan iyidir).
+        """
         close_side = "SELL" if entry_side == "buy" else "BUY"
         market_symbol = self.exchange.market(symbol)["id"]  # 'BTC/USDT' -> 'BTCUSDT'
 
@@ -107,6 +115,11 @@ class BinanceClient:
             "reduceOnly": "true",
             "workingType": "MARK_PRICE",
         }
+        if order_type == "TAKE_PROFIT":
+            # LIMIT emirlerde fiyat zorunlu - tetik fiyatının aynısını fiyat olarak veriyoruz
+            params["price"] = trigger_price
+            params["timeInForce"] = "GTC"
+
         return self._signed_algo_request("POST", "/fapi/v1/algoOrder", params)
 
     def get_open_algo_orders(self, symbol: str) -> list:
@@ -117,8 +130,26 @@ class BinanceClient:
     def cancel_algo_order(self, algo_id):
         return self._signed_algo_request("DELETE", "/fapi/v1/algoOrder", {"algoId": algo_id})
 
+    def get_algo_order(self, algo_id: int):
+        """Bir algo emrin GERÇEK durumunu ve gerçekleşme fiyatını sorgular.
+        algoStatus: NEW / TRIGGERED / FINISHED / CANCELED
+        actualPrice: emir gerçekten tetiklenip yerine getirildiyse gerçek fiyat"""
+        return self._signed_algo_request("GET", "/fapi/v1/algoOrder", {"algoId": algo_id})
+
     def cancel_open_stop_orders(self, symbol: str):
-        """Bu sembol için açık tüm SL/TP (algo) emirlerini iptal eder."""
+        """Bu sembol için açık STOP_MARKET emirlerini iptal eder.
+        TAKE_PROFIT emrine DOKUNMAZ - breakeven güncellemesinde TP hedefi kaybolmasın diye."""
+        try:
+            orders = self.get_open_algo_orders(symbol)
+            for order in orders:
+                if order.get("orderType") == "STOP_MARKET":
+                    self.cancel_algo_order(order["algoId"])
+        except Exception as e:
+            logger.error(f"{symbol}: açık stop emirleri iptal edilemedi: {e}")
+
+    def cancel_all_algo_orders(self, symbol: str):
+        """SL VE TP dahil, bu sembol için açık tüm algo emirlerini iptal eder.
+        Pozisyonu tamamen manuel kapatırken (momentum kaybı vb.) kullanılır."""
         try:
             orders = self.get_open_algo_orders(symbol)
             for order in orders:
@@ -134,6 +165,10 @@ class BinanceClient:
         """
         side: 'buy' (long) veya 'sell' (short)
         amount: kontrat/coin miktarı (pozisyon büyüklüğü hesaplanmış olarak gelir)
+
+        Dönüş: {"order": ..., "sl_algo_id": int|None, "tp_algo_id": int|None}
+        Bu ID'ler, pozisyonun GERÇEKTEN hangi emirle (SL mi TP mi) kapandığını
+        sonradan kesin olarak tespit edebilmek için Trade kaydına yazılır.
         """
         order = self.exchange.create_order(
             symbol=symbol,
@@ -143,18 +178,22 @@ class BinanceClient:
         )
         logger.info(f"Pozisyon açıldı: {symbol} {side} {amount}")
 
+        sl_algo_id, tp_algo_id = None, None
+
         if stop_loss:
             try:
-                self._place_algo_stop_order(symbol, side, amount, stop_loss, order_type="STOP_MARKET")
+                resp = self._place_algo_stop_order(symbol, side, amount, stop_loss, order_type="STOP_MARKET")
+                sl_algo_id = resp.get("algoId")
             except Exception as e:
                 logger.error(f"❌ {symbol}: Stop-loss emri KONULAMADI, pozisyon korumasız! Hata: {e}")
         if take_profit:
             try:
-                self._place_algo_stop_order(symbol, side, amount, take_profit, order_type="TAKE_PROFIT_MARKET")
+                resp = self._place_algo_stop_order(symbol, side, amount, take_profit, order_type="TAKE_PROFIT")
+                tp_algo_id = resp.get("algoId")
             except Exception as e:
                 logger.error(f"❌ {symbol}: Take-profit emri konulamadı: {e}")
 
-        return order
+        return {"order": order, "sl_algo_id": sl_algo_id, "tp_algo_id": tp_algo_id}
 
     def close_position(self, symbol: str, side: str, amount: float):
         close_side = "sell" if side == "buy" else "buy"
@@ -166,10 +205,12 @@ class BinanceClient:
             params={"reduceOnly": True},
         )
 
-    def update_stop_loss(self, symbol: str, side: str, amount: float, new_stop_price: float):
-        """Breakeven / trailing stop için mevcut SL/TP algo emirlerini iptal edip yeni SL koyar."""
+    def update_stop_loss(self, symbol: str, side: str, amount: float, new_stop_price: float) -> int:
+        """Breakeven / trailing stop için mevcut SL algo emrini iptal edip yenisini koyar.
+        Dönüş: yeni SL emrinin algoId'si (Trade kaydında güncellenmesi gerekir)."""
         self.cancel_open_stop_orders(symbol)
-        return self._place_algo_stop_order(symbol, side, amount, new_stop_price, order_type="STOP_MARKET")
+        resp = self._place_algo_stop_order(symbol, side, amount, new_stop_price, order_type="STOP_MARKET")
+        return resp.get("algoId")
 
     # ------------------------------------------------------------------
     # DİNAMİK PİYASA TARAMASI

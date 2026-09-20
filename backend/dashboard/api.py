@@ -8,7 +8,7 @@ Binance'in HERKESE AÇIK (public) uç noktalarını kullanır.
 import os
 import requests
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +17,9 @@ from sqlalchemy import func
 from backend import config
 from backend.db.database import get_session
 from backend.db.models import Trade, TradeStatus, BotCapital
+from backend.exchange.binance_client import BinanceClient
+from backend.risk import kill_switch as kill_switch_module
+from backend.db import repository
 
 app = FastAPI(title="Crypto Bot Dashboard")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -189,3 +192,43 @@ def symbols():
         return syms
     finally:
         session.close()
+
+
+@app.post("/api/trades/{trade_id}/close")
+def close_trade_manually(trade_id: int):
+    """Dashboard'dan manuel pozisyon kapatma. Hem borsadaki pozisyonu hem
+    ilişkili SL/TP algo emirlerini kapatır, veritabanını ve sanal kasayı günceller."""
+    session = get_session()
+    try:
+        trade = session.query(Trade).filter(Trade.id == trade_id).first()
+        if not trade:
+            raise HTTPException(status_code=404, detail="İşlem bulunamadı")
+        if trade.status != TradeStatus.OPEN:
+            raise HTTPException(status_code=400, detail="Bu işlem zaten kapalı")
+
+        trade_data = {"symbol": trade.symbol, "side": trade.side, "amount": trade.amount,
+                      "entry_price": trade.entry_price, "engine": trade.engine}
+    finally:
+        session.close()
+
+    client = BinanceClient()
+    try:
+        client.cancel_all_algo_orders(trade_data["symbol"])
+    except Exception as e:
+        pass  # emir zaten yoksa/iptal olmuşsa önemli değil
+
+    try:
+        client.close_position(trade_data["symbol"], trade_data["side"], trade_data["amount"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Pozisyon kapatılamadı: {e}")
+
+    exit_price = _public_ticker_price(trade_data["symbol"].replace("/", "")) or trade_data["entry_price"]
+    direction = 1 if trade_data["side"] == "buy" else -1
+    pnl_usd = (exit_price - trade_data["entry_price"]) * trade_data["amount"] * direction
+
+    repository.close_trade(trade_id, exit_price, pnl_usd, TradeStatus.CLOSED_MANUAL)
+    new_balance = repository.update_virtual_balance(pnl_usd)
+    kill_switch_module.record_realized_pnl(pnl_usd, new_balance - pnl_usd)
+    kill_switch_module.record_engine_trade_result(trade_data["engine"], is_win=(pnl_usd > 0))
+
+    return {"success": True, "exit_price": exit_price, "pnl_usd": round(pnl_usd, 2), "new_balance": round(new_balance, 2)}

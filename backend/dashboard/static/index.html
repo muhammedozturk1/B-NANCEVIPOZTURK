@@ -80,7 +80,7 @@
   <div class="panel">
     <strong>İşlemler</strong>
     <table id="tradesTable">
-      <thead><tr><th>Motor</th><th>Sembol</th><th>Yön</th><th>Giriş</th><th>Durum</th><th>PnL</th><th>Tarih</th></tr></thead>
+      <thead><tr><th>Motor</th><th>Sembol</th><th>Yön</th><th>Giriş</th><th>Durum</th><th>PnL</th><th>Tarih</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -186,6 +186,22 @@ async function loadExitBreakdown() {
   }).join('');
 }
 
+async function closeTrade(id) {
+  if (!confirm('Bu işlemi manuel kapatmak istediğine emin misin?')) return;
+  try {
+    const r = await fetch(`/api/trades/${id}/close`, { method: 'POST' });
+    const data = await r.json();
+    if (data.success) {
+      alert(`Kapatıldı. Çıkış: ${data.exit_price}, PnL: $${data.pnl_usd}`);
+      loadSummary(); loadTrades();
+    } else {
+      alert('Hata: ' + (data.detail || 'bilinmeyen hata'));
+    }
+  } catch (e) {
+    alert('İstek başarısız: ' + e);
+  }
+}
+
 async function loadTrades() {
   const r = await fetch('/api/trades?status=all'); const trades = await r.json();
   const tbody = document.querySelector('#tradesTable tbody');
@@ -198,6 +214,7 @@ async function loadTrades() {
       <td><span class="badge ${t.status.replace('closed_','')}">${t.status}</span></td>
       <td class="${colorPnl(t.pnl_usd)}">${fmt$(t.pnl_usd)}</td>
       <td>${t.opened_at ? new Date(t.opened_at).toLocaleString('tr-TR') : '-'}</td>
+      <td>${t.status === 'open' ? `<button onclick="closeTrade(${t.id})">Kapat</button>` : ''}</td>
     </tr>`).join('');
 }
 

@@ -166,8 +166,8 @@ def _open_trade(engine_name: str, symbol: str, side: str, entry_candles: list, e
         return
 
     client.set_leverage(symbol, leverage)
-    client.open_position(symbol, side, sizing["amount"],
-                          stop_loss=stop_loss, take_profit=tp_prices["take_profit_1"])
+    open_result = client.open_position(symbol, side, sizing["amount"],
+                                        stop_loss=stop_loss, take_profit=tp_prices["take_profit_1"])
 
     trade = repository.save_trade(
         engine=engine_name,
@@ -183,6 +183,8 @@ def _open_trade(engine_name: str, symbol: str, side: str, entry_candles: list, e
         status=TradeStatus.OPEN,
         confluence_score=int(evaluation["score"]),
         strategies_used=",".join(config.ENGINE_STRATEGIES[engine_name]),
+        sl_algo_id=open_result.get("sl_algo_id"),
+        tp_algo_id=open_result.get("tp_algo_id"),
     )
 
     logger.info(f"[{engine_name}] ✅ YENİ İŞLEM: {symbol} {side.upper()} @ {entry_price} "

@@ -47,6 +47,9 @@ class Trade(Base):
 
     telegram_message_id = Column(Integer, nullable=True)   # açılış bildirim mesajı - reply-thread için
 
+    sl_algo_id = Column(Integer, nullable=True)   # Binance algo order ID - gerçek SL durumu sorgusu için
+    tp_algo_id = Column(Integer, nullable=True)   # Binance algo order ID - gerçek TP durumu sorgusu için
+
     opened_at = Column(DateTime, server_default=func.now())
     closed_at = Column(DateTime, nullable=True)
 

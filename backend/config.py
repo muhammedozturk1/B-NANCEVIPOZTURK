@@ -61,7 +61,9 @@ VOLATILITY_ATR_THRESHOLD = 0.015  # ATR/fiyat oranı bu değerin altındaysa "d�
 
 # R/R oranları (motor bazlı, TP1/TP2 için)
 RISK_REWARD = {
-    "scalp": {"tp1": 1.2, "tp2": 2.0},
+    # Gerçek veri: scalp motorunun kazanma oranı ~%36. Başabaş için gereken R/R = (1-0.36)/0.36 ≈ 1.78.
+    # Güvenli marj için 2.0/3.0 seçildi - mevcut sinyal kalitesiyle bile matematiksel olarak kârlı olmalı.
+    "scalp": {"tp1": 2.0, "tp2": 3.0},
     "day": {"tp1": 1.5, "tp2": 2.5},
     "swing": {"tp1": 2.0, "tp2": 3.5},
 }
