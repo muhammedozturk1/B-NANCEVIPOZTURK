@@ -113,7 +113,11 @@ class BinanceClient:
             "triggerPrice": trigger_price,
             "quantity": amount,
             "reduceOnly": "true",
-            "workingType": "MARK_PRICE",
+            # ÖNEMLİ: MARK_PRICE yerine CONTRACT_PRICE (gerçek son işlem fiyatı) kullanıyoruz.
+            # Testnet'te Mark Price, ince/sığ likidite yüzünden gerçekçi olmayan ani sıçramalar
+            # yapabiliyor ve bu da fiyat aslında hedefe hiç gelmeden emri yanlışlıkla tetikliyordu
+            # ("açılır açılmaz stop olma" sorununun muhtemel kaynağı buydu).
+            "workingType": "CONTRACT_PRICE",
         }
         if order_type == "TAKE_PROFIT":
             # LIMIT emirlerde fiyat zorunlu - tetik fiyatının aynısını fiyat olarak veriyoruz
@@ -252,6 +256,20 @@ class BinanceClient:
     # ------------------------------------------------------------------
     def fetch_open_positions(self):
         """Borsadaki gerçek açık pozisyonları döner - reconnect sonrası DB ile
-        karşılaştırılıp 'yetim' pozisyon kalmaması sağlanır."""
+        karşılaştırılıp 'yetim' pozisyon kalmaması sağlanır.
+
+        ÖNEMLİ: ccxt, sembolü 'BTC/USDT:USDT' formatında döner (sonunda :USDT ile,
+        vadeli işlem kontratını belirtmek için). Ama bizim veritabanımızda semboller
+        'BTC/USDT' formatında (son ek olmadan) saklanıyor. Bu uyumsuzluk, pozisyon
+        eşleştirmesinin HİÇBİR ZAMAN çalışmamasına ve botun her açık pozisyonu birkaç
+        saniye içinde "kapanmış" sanmasına neden oluyordu - burada normalize ederek
+        tüm sistemde tutarlı format garantiliyoruz."""
         positions = self.exchange.fetch_positions()
-        return [p for p in positions if float(p.get("contracts", 0)) != 0]
+        result = []
+        for p in positions:
+            if float(p.get("contracts", 0) or 0) != 0:
+                p = dict(p)
+                if p.get("symbol") and ":" in p["symbol"]:
+                    p["symbol"] = p["symbol"].split(":")[0]
+                result.append(p)
+        return result

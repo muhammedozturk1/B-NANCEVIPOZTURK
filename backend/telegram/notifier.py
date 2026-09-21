@@ -50,15 +50,27 @@ ENGINE_LABELS = {"scalp": "⚡ Scalp", "day": "📆 Day", "swing": "🌊 Swing"}
 SIDE_LABELS = {"buy": "🟢 LONG", "sell": "🔴 SHORT"}
 
 
+def _fmt_price(price: float) -> str:
+    """Düşük fiyatlı coin'lerde (örn. 0.0038) 4 ondalık basamak yetersiz kalıp
+    TP1/TP2 gibi farklı değerleri aynıymış gibi gösterebiliyordu. Fiyata göre
+    ondalık basamak sayısını otomatik ayarlıyoruz."""
+    if price >= 1:
+        return f"{price:.4f}"
+    elif price >= 0.01:
+        return f"{price:.6f}"
+    else:
+        return f"{price:.8f}"
+
+
 def send_trade_opened(trade: Trade):
     text = (
         f"<b>{ENGINE_LABELS.get(trade.engine, trade.engine)} — Yeni İşlem</b>\n"
         f"{SIDE_LABELS.get(trade.side, trade.side)} {trade.symbol}\n\n"
-        f"Giriş: <code>{trade.entry_price:.4f}</code>\n"
+        f"Giriş: <code>{_fmt_price(trade.entry_price)}</code>\n"
         f"Kaldıraç: {trade.leverage}x\n"
-        f"Stop: <code>{trade.stop_loss:.4f}</code>\n"
-        f"TP1: <code>{trade.take_profit_1:.4f}</code>\n"
-        f"TP2: <code>{trade.take_profit_2:.4f}</code>\n"
+        f"Stop: <code>{_fmt_price(trade.stop_loss)}</code>\n"
+        f"TP1: <code>{_fmt_price(trade.take_profit_1)}</code>\n"
+        f"TP2: <code>{_fmt_price(trade.take_profit_2)}</code>\n"
         f"Risk: {trade.risk_usd:.2f}$\n"
         f"Confluence skoru: {trade.confluence_score} ({trade.strategies_used})"
     )
