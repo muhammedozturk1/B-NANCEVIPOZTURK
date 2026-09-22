@@ -17,6 +17,7 @@ anlık ticker fiyatından okunur; bu, gerçek kapanış fiyatından çok küçü
 sapma gösterebilir ama işlem takibi için yeterlidir.
 """
 import logging
+from datetime import timezone
 from backend import config
 from backend.db.database import get_session
 from backend.db.models import Trade, TradeStatus
@@ -158,20 +159,33 @@ def _check_breakeven(trade: Trade, current_price: float, client):
 
 
 def _check_momentum_reversal(trade: Trade, candles: list, client):
-    """TP1'e henüz ulaşmadan, fiyat lehimize gidip belirgin geri dönerse pozisyonu kapat."""
-    if trade.moved_to_breakeven:
-        return  # TP1 zaten geçildi, bu artık momentum-kaybı değil normal breakeven süreci
+    """TP1'e henüz ulaşmadan, fiyat lehimize gidip belirgin geri dönerse pozisyonu kapat.
 
-    current_price = candles[-1][4]
+    KRİTİK DÜZELTME: 'candles' parametresi son N mumu (işlem açılmadan ÖNCEKİ mumlar
+    dahil) içerir. Eskiden 'en iyi fiyat' hesabı bu ÖNCEKİ mumları da tarıyordu -
+    işlem yeni açılmış olsa bile, açılıştan önceki bir fiyat tepesini "bu işlem
+    kâr etmişti, şimdi geri çekiliyor" diye yanlış yorumlayıp anında (birkaç saniye
+    içinde) pozisyonu kapatıyordu. Artık SADECE trade.opened_at'ten SONRAKİ mumlar
+    değerlendiriliyor."""
+    if trade.moved_to_breakeven:
+        return
+
+    opened_at_ms = int(trade.opened_at.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    relevant_candles = [c for c in candles if c[0] >= opened_at_ms]
+
+    if len(relevant_candles) < 2:
+        return  # işlem çok yeni, henüz değerlendirilecek yeterli veri yok
+
+    current_price = relevant_candles[-1][4]
 
     if trade.side == "buy":
-        best_price = max(c[2] for c in candles)  # lookback içindeki en yüksek fiyat
+        best_price = max(c[2] for c in relevant_candles)  # işlem açıldıktan SONRAKİ en yüksek fiyat
         favorable_move = best_price - trade.entry_price
         if favorable_move <= 0:
             return  # henüz kârda değiliz, momentum kaybı değerlendirmesi erken
         retrace = best_price - current_price
     else:
-        best_price = min(c[3] for c in candles)
+        best_price = min(c[3] for c in relevant_candles)
         favorable_move = trade.entry_price - best_price
         if favorable_move <= 0:
             return
