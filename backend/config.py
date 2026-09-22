@@ -187,7 +187,12 @@ NEWS_RELEVANT_CURRENCIES = {"USD"}
 # ----------------------------------------------------------------------
 # FAZ 3 - BREAKEVEN / MOMENTUM KAYBI / POZİSYON İZLEME
 # ----------------------------------------------------------------------
-POSITION_MONITOR_INTERVAL_SECONDS = 30
+POSITION_MONITOR_INTERVAL_SECONDS = 90  # önceki 30sn, Binance IP banına (418 hatası) yol açıyordu
+
+# Motor döngüsünde sembol taraması sırasında art arda hızlı istek göndermemek için
+# her sembol arasında küçük bir bekleme (saniye). Toplam istek sayısını değiştirmez,
+# sadece saniye başına yoğunluğu düşürerek ban riskini azaltır.
+API_REQUEST_SPACING_SECONDS = 0.3
 
 # Fiyat, TP2'ye giden yoldaki en iyi noktadan bu oranın üzerinde geri
 # çekilirse (kâr vermeden), pozisyon momentum kaybı nedeniyle kapatılır.

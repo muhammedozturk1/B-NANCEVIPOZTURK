@@ -17,6 +17,7 @@ anlık ticker fiyatından okunur; bu, gerçek kapanış fiyatından çok küçü
 sapma gösterebilir ama işlem takibi için yeterlidir.
 """
 import logging
+import time
 from datetime import timezone
 from backend import config
 from backend.db.database import get_session
@@ -226,6 +227,7 @@ def run_monitor_cycle(client):
         return
 
     for trade in open_trades:
+        time.sleep(config.API_REQUEST_SPACING_SECONDS)
         try:
             position = _find_exchange_position(trade, exchange_positions)
 

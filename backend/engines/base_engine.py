@@ -9,6 +9,7 @@ Akış:
   5) Marj yeterliyse pozisyonu aç, veritabanına kaydet, bildirim gönder
 """
 import logging
+import time
 from backend import config
 from backend.db import repository
 from backend.db.models import TradeStatus
@@ -105,6 +106,7 @@ def run_cycle(engine_name: str, client):
     active_symbols = symbol_scanner.get_active_symbols(client)
 
     for symbol in active_symbols:
+        time.sleep(config.API_REQUEST_SPACING_SECONDS)
         try:
             if open_count >= max_positions:
                 logger.info(f"[{engine_name}] maksimum eşzamanlı pozisyon limitine ulaşıldı ({max_positions}).")
