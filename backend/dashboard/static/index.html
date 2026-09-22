@@ -56,6 +56,7 @@
           <option value="1d">1g</option>
         </select>
       </div>
+      <div id="focusIndicator" style="font-size:12px; color:var(--muted);"></div>
     </div>
     <div id="chart"></div>
   </div>
@@ -80,7 +81,7 @@
   <div class="panel">
     <strong>İşlemler</strong>
     <table id="tradesTable">
-      <thead><tr><th>Motor</th><th>Sembol</th><th>Yön</th><th>Giriş</th><th>Durum</th><th>PnL</th><th>Tarih</th><th></th></tr></thead>
+      <thead><tr><th>Motor</th><th>Sembol</th><th>Yön</th><th>Giriş</th><th>Durum</th><th>PnL</th><th>Tarih</th><th></th><th></th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -109,6 +110,11 @@ async function loadSymbols() {
 }
 
 let chart, candleSeries, priceLines = [];
+let focusedTradeId = null;
+let allTradesCache = [];
+
+const ENGINE_TIMEFRAME = { scalp: '1m', day: '15m', swing: '4h' };
+
 function initChart() {
   chart = LightweightCharts.createChart(document.getElementById('chart'), {
     height: 400,
@@ -120,6 +126,20 @@ function initChart() {
     upColor: '#3fb950', downColor: '#f85149', borderVisible: false,
     wickUpColor: '#3fb950', wickDownColor: '#f85149',
   });
+}
+
+function focusOnTrade(tradeId) {
+  const trade = allTradesCache.find(t => t.id === tradeId);
+  if (!trade) return;
+  focusedTradeId = tradeId;
+  document.getElementById('symbolSelect').value = trade.symbol;
+  document.getElementById('timeframeSelect').value = ENGINE_TIMEFRAME[trade.engine] || '15m';
+  loadChart();
+}
+
+function clearFocus() {
+  focusedTradeId = null;
+  loadChart();
 }
 
 async function loadChart() {
@@ -135,25 +155,38 @@ async function loadChart() {
   priceLines.forEach(pl => candleSeries.removePriceLine(pl));
   priceLines = [];
 
-  const tr = await fetch(`/api/trades?status=all`);
-  const trades = (await tr.json()).filter(t => t.symbol === symbol).slice(0, 5);
+  const focusEl = document.getElementById('focusIndicator');
+  let tradesToShow;
+
+  if (focusedTradeId) {
+    const t = allTradesCache.find(x => x.id === focusedTradeId);
+    tradesToShow = t ? [t] : [];
+    focusEl.innerHTML = t ? `📌 İşlem #${t.id} izleniyor <button onclick="clearFocus()">Tümünü göster</button>` : '';
+  } else {
+    tradesToShow = allTradesCache.filter(t => t.symbol === symbol).slice(0, 5);
+    focusEl.innerHTML = '';
+  }
 
   const markers = [];
-  trades.forEach(t => {
+  tradesToShow.forEach(t => {
     const entryTime = Math.floor(new Date(t.opened_at).getTime() / 1000);
     markers.push({ time: entryTime, position: t.side === 'buy' ? 'belowBar' : 'aboveBar',
                    color: t.side === 'buy' ? '#3fb950' : '#f85149',
                    shape: t.side === 'buy' ? 'arrowUp' : 'arrowDown',
-                   text: `${t.engine} giriş` });
+                   text: `${t.engine} giriş #${t.id}` });
     if (t.exit_price) {
       const exitTime = Math.floor(new Date(t.closed_at).getTime() / 1000);
-      markers.push({ time: exitTime, position: 'inBar', color: '#d29922', shape: 'circle', text: t.status });
+      const exitColor = (t.pnl_usd || 0) >= 0 ? '#3fb950' : '#f85149';
+      markers.push({ time: exitTime, position: 'inBar', color: exitColor, shape: 'circle',
+                     text: `${t.status} (${t.pnl_usd >= 0 ? '+' : ''}${t.pnl_usd?.toFixed(2)}$)` });
     }
-    if (t.status === 'open') {
-      priceLines.push(candleSeries.createPriceLine({ price: t.stop_loss, color: '#f85149', lineWidth: 1, lineStyle: 2, title: 'SL' }));
-      priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_1, color: '#3fb950', lineWidth: 1, lineStyle: 2, title: 'TP1' }));
-      priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_2, color: '#3fb950', lineWidth: 1, lineStyle: 0, title: 'TP2' }));
-    }
+
+    // AÇIK ya da KAPALI fark etmeksizin SL/TP seviyelerini çiz (Binance'teki gibi referans için)
+    const lineStyle = t.status === 'open' ? 0 : 2; // açıksa düz çizgi, kapalıysa kesikli
+    priceLines.push(candleSeries.createPriceLine({ price: t.stop_loss, color: '#f85149', lineWidth: 1, lineStyle, title: `SL #${t.id}` }));
+    priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_1, color: '#3fb950', lineWidth: 1, lineStyle, title: `TP1 #${t.id}` }));
+    priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_2, color: '#3fb950', lineWidth: 2, lineStyle, title: `TP2 #${t.id}` }));
+    priceLines.push(candleSeries.createPriceLine({ price: t.entry_price, color: '#8b949e', lineWidth: 1, lineStyle: 3, title: `Giriş #${t.id}` }));
   });
   candleSeries.setMarkers(markers.sort((a,b) => a.time - b.time));
 }
@@ -204,6 +237,7 @@ async function closeTrade(id) {
 
 async function loadTrades() {
   const r = await fetch('/api/trades?status=all'); const trades = await r.json();
+  allTradesCache = trades;
   const tbody = document.querySelector('#tradesTable tbody');
   tbody.innerHTML = trades.slice(0, 50).map(t => `
     <tr>
@@ -214,6 +248,7 @@ async function loadTrades() {
       <td><span class="badge ${t.status.replace('closed_','')}">${t.status}</span></td>
       <td class="${colorPnl(t.pnl_usd)}">${fmt$(t.pnl_usd)}</td>
       <td>${t.opened_at ? new Date(t.opened_at).toLocaleString('tr-TR') : '-'}</td>
+      <td><button onclick="focusOnTrade(${t.id})">📊 Grafikte Göster</button></td>
       <td>${t.status === 'open' ? `<button onclick="closeTrade(${t.id})">Kapat</button>` : ''}</td>
     </tr>`).join('');
 }
@@ -235,6 +270,7 @@ async function safe(fn, label) {
 async function init() {
   await safe(loadSummary, 'Özet');
   await safe(loadSymbols, 'Semboller');
+  await safe(loadTrades, 'İşlemler');
   try {
     initChart();
     await safe(loadChart, 'Grafik');
@@ -243,10 +279,8 @@ async function init() {
   }
   await safe(() => loadCumulative(), 'Kümülatif PnL');
   await safe(loadExitBreakdown, 'Dağılım');
-  await safe(loadTrades, 'İşlemler');
 
-  setInterval(() => { safe(loadSummary); safe(loadTrades); }, 30000);
-  setInterval(() => safe(loadChart), 60000);
+  setInterval(() => { safe(loadSummary); safe(loadTrades).then(() => safe(loadChart)); }, 30000);
 }
 init();
 </script>
