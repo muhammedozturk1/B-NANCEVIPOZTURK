@@ -198,6 +198,14 @@ API_REQUEST_SPACING_SECONDS = 0.3
 # çekilirse (kâr vermeden), pozisyon momentum kaybı nedeniyle kapatılır.
 MOMENTUM_REVERSAL_RETRACE_PERCENT = 0.40
 
+# KRİTİK: Momentum kaybı değerlendirmesi, fiyat stop mesafesinin en az bu kadarı
+# (örn. %50'si) kadar lehimize gitmeden BAŞLAMAZ. Bu taban olmadan, çok küçük bir
+# lehte hareket (örn. stop mesafesinin %2'si) bile "büyük ilerleme, şimdi geri
+# çekiliyor" diye yanlış yorumlanıyor ve normal piyasa titreşiminde bile pozisyon
+# anında (dakikalar içinde) kapatılıyordu - TÜM işlemlerin momentum-kaybıyla
+# kapanmasının sebebi buydu.
+MOMENTUM_MIN_FAVORABLE_FRACTION = 0.5
+
 # Bu kadar mumluk geçmiş, "en iyi favorable fiyatı" hesaplamak için taranır
 MOMENTUM_LOOKBACK_CANDLES = 30
 

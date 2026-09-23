@@ -178,17 +178,19 @@ def _check_momentum_reversal(trade: Trade, candles: list, client):
         return  # işlem çok yeni, henüz değerlendirilecek yeterli veri yok
 
     current_price = relevant_candles[-1][4]
+    stop_distance = abs(trade.entry_price - trade.stop_loss)
+    min_meaningful_move = stop_distance * config.MOMENTUM_MIN_FAVORABLE_FRACTION
 
     if trade.side == "buy":
         best_price = max(c[2] for c in relevant_candles)  # işlem açıldıktan SONRAKİ en yüksek fiyat
         favorable_move = best_price - trade.entry_price
-        if favorable_move <= 0:
-            return  # henüz kârda değiliz, momentum kaybı değerlendirmesi erken
+        if favorable_move < min_meaningful_move:
+            return  # henüz anlamlı bir ilerleme yok (stop mesafesinin yarısından az), değerlendirme erken
         retrace = best_price - current_price
     else:
         best_price = min(c[3] for c in relevant_candles)
         favorable_move = trade.entry_price - best_price
-        if favorable_move <= 0:
+        if favorable_move < min_meaningful_move:
             return
         retrace = current_price - best_price
 
