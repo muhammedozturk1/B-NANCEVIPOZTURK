@@ -101,27 +101,37 @@ class BinanceClient:
         slippage'ı (kazancın hedefin biraz gerisinde gerçekleşmesini) önler. Stop-loss
         ise garantili çıkış önceliği taşıdığı için MARKET tipinde kalır (fiyat kaymasını
         göze alarak da olsa pozisyondan kesin çıkmak, hiç çıkamamaktan iyidir).
+
+        KRİTİK: Fiyat ve miktar, borsanın o sembol için izin verdiği hassasiyete
+        (tickSize/stepSize) YUVARLANMADAN gönderiliyordu. Özellikle düşük fiyatlı
+        coin'lerde (AKE, DOGE gibi çok ondalıklı fiyatlar) bu, Binance'in emri
+        SESSİZCE reddetmesine yol açabiliyordu - pozisyon açılıyor ama SL hiç
+        yerleşmiyor, pozisyon korumasız kalıp beklenenden çok daha büyük zarar
+        edebiliyordu. Artık ccxt'nin price_to_precision/amount_to_precision
+        fonksiyonlarıyla doğru hassasiyete yuvarlıyoruz.
         """
         close_side = "SELL" if entry_side == "buy" else "BUY"
         market_symbol = self.exchange.market(symbol)["id"]  # 'BTC/USDT' -> 'BTCUSDT'
+
+        rounded_trigger = self.exchange.price_to_precision(symbol, trigger_price)
+        rounded_amount = self.exchange.amount_to_precision(symbol, amount)
 
         params = {
             "algoType": "CONDITIONAL",
             "symbol": market_symbol,
             "side": close_side,
             "type": order_type,
-            "triggerPrice": trigger_price,
-            "quantity": amount,
+            "triggerPrice": rounded_trigger,
+            "quantity": rounded_amount,
             "reduceOnly": "true",
             # ÖNEMLİ: MARK_PRICE yerine CONTRACT_PRICE (gerçek son işlem fiyatı) kullanıyoruz.
             # Testnet'te Mark Price, ince/sığ likidite yüzünden gerçekçi olmayan ani sıçramalar
-            # yapabiliyor ve bu da fiyat aslında hedefe hiç gelmeden emri yanlışlıkla tetikliyordu
-            # ("açılır açılmaz stop olma" sorununun muhtemel kaynağı buydu).
+            # yapabiliyor ve bu da fiyat aslında hedefe hiç gelmeden emri yanlışlıkla tetikliyordu.
             "workingType": "CONTRACT_PRICE",
         }
         if order_type == "TAKE_PROFIT":
             # LIMIT emirlerde fiyat zorunlu - tetik fiyatının aynısını fiyat olarak veriyoruz
-            params["price"] = trigger_price
+            params["price"] = rounded_trigger
             params["timeInForce"] = "GTC"
 
         return self._signed_algo_request("POST", "/fapi/v1/algoOrder", params)
@@ -174,14 +184,17 @@ class BinanceClient:
         Bu ID'ler, pozisyonun GERÇEKTEN hangi emirle (SL mi TP mi) kapandığını
         sonradan kesin olarak tespit edebilmek için Trade kaydına yazılır.
         """
+        rounded_amount = float(self.exchange.amount_to_precision(symbol, amount))
+
         order = self.exchange.create_order(
             symbol=symbol,
             type="market",
             side=side,
-            amount=amount,
+            amount=rounded_amount,
         )
-        logger.info(f"Pozisyon açıldı: {symbol} {side} {amount}")
+        logger.info(f"Pozisyon açıldı: {symbol} {side} {rounded_amount}")
 
+        amount = rounded_amount  # SL/TP emirlerinde de AYNI (yuvarlanmış) miktar kullanılmalı
         sl_algo_id, tp_algo_id = None, None
 
         if stop_loss:

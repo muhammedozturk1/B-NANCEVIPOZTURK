@@ -171,6 +171,10 @@ def _check_momentum_reversal(trade: Trade, candles: list, client):
     if trade.moved_to_breakeven:
         return
 
+    min_fraction = config.MOMENTUM_MIN_FAVORABLE_FRACTION.get(trade.engine)
+    if min_fraction is None:
+        return  # bu motor için momentum kaybı koruması tamamen devre dışı
+
     opened_at_ms = int(trade.opened_at.replace(tzinfo=timezone.utc).timestamp() * 1000)
     relevant_candles = [c for c in candles if c[0] >= opened_at_ms]
 
@@ -179,7 +183,7 @@ def _check_momentum_reversal(trade: Trade, candles: list, client):
 
     current_price = relevant_candles[-1][4]
     stop_distance = abs(trade.entry_price - trade.stop_loss)
-    min_meaningful_move = stop_distance * config.MOMENTUM_MIN_FAVORABLE_FRACTION
+    min_meaningful_move = stop_distance * min_fraction
 
     if trade.side == "buy":
         best_price = max(c[2] for c in relevant_candles)  # işlem açıldıktan SONRAKİ en yüksek fiyat

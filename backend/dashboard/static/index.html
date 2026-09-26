@@ -181,12 +181,18 @@ async function loadChart() {
                      text: `${t.status} (${t.pnl_usd >= 0 ? '+' : ''}${t.pnl_usd?.toFixed(2)}$)` });
     }
 
-    // AÇIK ya da KAPALI fark etmeksizin SL/TP seviyelerini çiz (Binance'teki gibi referans için)
-    const lineStyle = t.status === 'open' ? 0 : 2; // açıksa düz çizgi, kapalıysa kesikli
-    priceLines.push(candleSeries.createPriceLine({ price: t.stop_loss, color: '#f85149', lineWidth: 1, lineStyle, title: `SL #${t.id}` }));
-    priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_1, color: '#3fb950', lineWidth: 1, lineStyle, title: `TP1 #${t.id}` }));
-    priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_2, color: '#3fb950', lineWidth: 2, lineStyle, title: `TP2 #${t.id}` }));
-    priceLines.push(candleSeries.createPriceLine({ price: t.entry_price, color: '#8b949e', lineWidth: 1, lineStyle: 3, title: `Giriş #${t.id}` }));
+    // Kalabalığı önlemek için: SADECE odaklanılan tek işlemde (focusedTradeId) ya da
+    // genel görünümde SADECE açık işlemlerde SL/TP/Giriş çizgileri çizilir. Genel
+    // görünümde kapalı işlemlerin çizgilerini de çizmek, birden fazla işlem üst üste
+    // binince grafiği okunmaz hale getiriyordu.
+    const shouldDrawLines = focusedTradeId ? true : t.status === 'open';
+    if (shouldDrawLines) {
+      const lineStyle = t.status === 'open' ? 0 : 2;
+      priceLines.push(candleSeries.createPriceLine({ price: t.stop_loss, color: '#f85149', lineWidth: 1, lineStyle, title: `SL #${t.id}` }));
+      priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_1, color: '#3fb950', lineWidth: 1, lineStyle, title: `TP1 #${t.id}` }));
+      priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_2, color: '#3fb950', lineWidth: 2, lineStyle, title: `TP2 #${t.id}` }));
+      priceLines.push(candleSeries.createPriceLine({ price: t.entry_price, color: '#8b949e', lineWidth: 1, lineStyle: 3, title: `Giriş #${t.id}` }));
+    }
   });
   candleSeries.setMarkers(markers.sort((a,b) => a.time - b.time));
 }
