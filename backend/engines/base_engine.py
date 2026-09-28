@@ -17,6 +17,7 @@ from backend.risk import position_sizing, kill_switch, correlation, news_filter
 from backend.strategies import ema, vwap, smc, liquidity, support_resistance, fear_greed
 from backend.telegram import notifier
 from backend.exchange import symbol_scanner
+from backend.exchange.binance_client import UnprotectedPositionError
 
 logger = logging.getLogger("base_engine")
 
@@ -168,8 +169,13 @@ def _open_trade(engine_name: str, symbol: str, side: str, entry_candles: list, e
         return
 
     client.set_leverage(symbol, leverage)
-    open_result = client.open_position(symbol, side, sizing["amount"],
-                                        stop_loss=stop_loss, take_profit=tp_prices["take_profit_1"])
+    try:
+        open_result = client.open_position(symbol, side, sizing["amount"],
+                                            stop_loss=stop_loss, take_profit=tp_prices["take_profit_1"])
+    except UnprotectedPositionError as e:
+        logger.critical(str(e))
+        notifier.send_alert(str(e))
+        raise
 
     trade = repository.save_trade(
         engine=engine_name,
