@@ -149,3 +149,8 @@ def send_weekly_summary():
     lines.append(f"<b>Güncel sanal kasa: {virtual_balance:.2f}$</b>")
 
     _send_raw("\n".join(lines))
+
+
+def send_alert(text: str):
+    """Acil durum uyarısı (örn. korumasız pozisyon)."""
+    _send_raw(f"🚨 <b>UYARI</b>\n{text}")
