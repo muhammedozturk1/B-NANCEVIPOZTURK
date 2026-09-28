@@ -99,6 +99,14 @@ def _determine_close_outcome(trade: Trade, client):
 def _handle_trade_closed(trade: Trade, client):
     outcome, actual_price = _determine_close_outcome(trade, client)
 
+    # KRİTİK: SL ile kapanınca TP emri (veya tersi) borsada AÇIK KALIYORDU - Binance bu
+    # emirleri birbirine bağlamıyor. Bu artık emirler aynı sembolde açılacak bir sonraki
+    # pozisyonu beklenmedik anda kapatabilir. Sonucu yukarıda okuduk, şimdi temizliyoruz.
+    try:
+        client.cancel_all_algo_orders(trade.symbol)
+    except Exception as e:
+        logger.warning(f"[{trade.engine}] {trade.symbol}: arta kalan algo emirleri iptal edilemedi: {e}")
+
     if outcome == "tp":
         exit_price = actual_price
         status = TradeStatus.CLOSED_TP1  # şu an tek TP emri var, her zaman TP1 seviyesinde
