@@ -84,10 +84,13 @@ ENGINE_STRATEGIES = {
     "day": ["ema", "vwap", "smc", "support_resistance"],
     "swing": ["smc", "liquidity_zones", "support_resistance", "fear_greed"],
 }
+# Oy ağırlıkları: tam sinyal 1.0, zayıf sinyal (örn. yeni kesişimi olmayan EMA trendi) 0.5.
+# Tanılama sonucu (27 Eylül): scalp için eşik 3 iken 15 sembolün hiçbirinde 1.5'i geçen
+# oy çıkmadı, bot bir gün boyunca işlem alamadı. Eşikler ulaşılabilir seviyeye çekildi.
 CONFLUENCE_THRESHOLD = {
-    "scalp": 3,   # önceki 2/3 çok gevşekti (%33 kazanma oranı) - artık 3 teknikten HEPSİ aynı yönde onay vermeli
-    "day": 3,     # 4 teknikten en az 3'ü
-    "swing": 3,   # 4 teknikten en az 3'ü
+    "scalp": 2.5,   # örn. EMA trendi (0.5) + VWAP (1) + destek/direnç (1)
+    "day": 2.5,     # 4 teknikten iki tam + bir yarım oy
+    "swing": 2.0,   # önceki 3.0'da neredeyse hiç işlem açılamıyordu
 }
 
 # ----------------------------------------------------------------------
