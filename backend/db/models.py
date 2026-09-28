@@ -4,7 +4,7 @@ Veritabanı şeması.
 Trade tablosu dashboard'daki tüm mum-üstü işaretlemeler (giriş/TP/SL noktaları)
 ve motor bazlı istatistikler için tek kaynak.
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Enum
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Enum
 from sqlalchemy.sql import func
 from backend.db.database import Base
 import enum
@@ -47,8 +47,10 @@ class Trade(Base):
 
     telegram_message_id = Column(Integer, nullable=True)   # açılış bildirim mesajı - reply-thread için
 
-    sl_algo_id = Column(Integer, nullable=True)   # Binance algo order ID - gerçek SL durumu sorgusu için
-    tp_algo_id = Column(Integer, nullable=True)   # Binance algo order ID - gerçek TP durumu sorgusu için
+    # Binance algo emir ID'leri çok büyük sayılar (örn. 1000000221547664),
+    # normal Integer (en fazla ~2,1 milyar) yetmiyor, BigInteger şart.
+    sl_algo_id = Column(BigInteger, nullable=True)   # Binance algo order ID - gerçek SL durumu sorgusu için
+    tp_algo_id = Column(BigInteger, nullable=True)   # Binance algo order ID - gerçek TP durumu sorgusu için
 
     opened_at = Column(DateTime, server_default=func.now())
     closed_at = Column(DateTime, nullable=True)
