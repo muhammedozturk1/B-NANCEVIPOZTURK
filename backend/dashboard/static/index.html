@@ -7,255 +7,135 @@
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root {
-    --bg: #0a0e14;
-    --bg-2: #11161f;
-    --card: #151b26;
-    --card-hover: #1a2230;
-    --border: #232b3a;
-    --border-light: #2d3648;
-    --text: #e6edf3;
-    --text-dim: #8b96a8;
-    --text-mute: #5a6577;
-    --green: #26d07c;
-    --green-bg: #26d07c15;
-    --red: #f85149;
-    --red-bg: #f8514915;
-    --blue: #4d9fff;
-    --blue-bg: #4d9fff15;
-    --yellow: #e3b341;
-    --yellow-bg: #e3b34115;
-    --purple: #a371f7;
-    --purple-bg: #a371f715;
-    --scalp: #4d9fff;
-    --day: #e3b341;
-    --swing: #a371f7;
+    --bg: #0a0e14; --bg-2: #11161f; --card: #151b26; --card-hover: #1a2230;
+    --border: #232b3a; --border-light: #2d3648;
+    --text: #e6edf3; --text-dim: #8b96a8; --text-mute: #5a6577;
+    --green: #26d07c; --green-bg: #26d07c15;
+    --red: #f85149; --red-bg: #f8514915;
+    --blue: #4d9fff; --blue-bg: #4d9fff15;
+    --yellow: #e3b341; --yellow-bg: #e3b34115;
+    --purple: #a371f7; --purple-bg: #a371f715;
+    --scalp: #4d9fff; --day: #e3b341; --swing: #a371f7;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    background: var(--bg);
-    color: var(--text);
+    background: var(--bg); color: var(--text);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
   }
-
   .app { display: flex; min-height: 100vh; }
+
+  /* SIDEBAR */
   .sidebar {
-    width: 220px;
-    background: var(--bg-2);
-    border-right: 1px solid var(--border);
-    padding: 20px 0;
-    position: sticky;
-    top: 0;
-    height: 100vh;
-    flex-shrink: 0;
+    width: 220px; background: var(--bg-2); border-right: 1px solid var(--border);
+    padding: 20px 0; position: sticky; top: 0; height: 100vh; flex-shrink: 0;
   }
-  .logo {
-    padding: 0 20px 20px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 16px;
-  }
+  .logo { padding: 0 20px 20px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
   .logo h1 {
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.3px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    font-size: 15px; font-weight: 600; letter-spacing: -0.3px;
+    display: flex; align-items: center; gap: 8px;
   }
   .logo .dot {
-    width: 8px; height: 8px;
-    background: var(--green);
-    border-radius: 50%;
-    box-shadow: 0 0 8px var(--green);
-    animation: pulse 2s infinite;
+    width: 8px; height: 8px; background: var(--green); border-radius: 50%;
+    box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite;
   }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
   .logo p { color: var(--text-mute); font-size: 11px; margin-top: 4px; }
 
   .nav { padding: 0 12px; }
   .nav-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 12px;
-    border-radius: 8px;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    transition: all 0.15s;
-    margin-bottom: 2px;
-    border: none;
-    background: none;
-    width: 100%;
-    text-align: left;
-    font-family: inherit;
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+    border-radius: 8px; color: var(--text-dim); cursor: pointer;
+    font-size: 13px; font-weight: 500; transition: all 0.15s;
+    margin-bottom: 2px; border: none; background: none; width: 100%;
+    text-align: left; font-family: inherit;
   }
   .nav-item:hover { background: var(--card-hover); color: var(--text); }
   .nav-item.active { background: var(--blue-bg); color: var(--blue); }
   .nav-item .icon { width: 16px; text-align: center; }
   .nav-section {
-    color: var(--text-mute);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 16px 12px 6px;
-    font-weight: 600;
+    color: var(--text-mute); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 16px 12px 6px; font-weight: 600;
   }
 
   .main { flex: 1; padding: 24px 32px; max-width: 100%; overflow-x: hidden; }
 
   .topbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-    flex-wrap: wrap;
-    gap: 12px;
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
   }
   .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.4px; }
   .page-sub { color: var(--text-mute); font-size: 12px; margin-top: 2px; }
   .status-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    background: var(--green-bg);
-    color: var(--green);
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+    background: var(--green-bg); color: var(--green); border-radius: 20px;
+    font-size: 12px; font-weight: 500;
   }
   .status-pill .dot {
-    width: 6px; height: 6px;
-    background: var(--green);
-    border-radius: 50%;
+    width: 6px; height: 6px; background: var(--green); border-radius: 50%;
     animation: pulse 2s infinite;
   }
 
-  /* KPI CARDS */
+  /* KPI */
   .kpis {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 14px;
-    margin-bottom: 24px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px; margin-bottom: 24px;
   }
   .kpi {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 18px;
-    transition: all 0.2s;
-    position: relative;
-    overflow: hidden;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px; transition: all 0.2s; position: relative; overflow: hidden;
   }
   .kpi:hover { border-color: var(--border-light); transform: translateY(-1px); }
   .kpi .label {
-    color: var(--text-mute);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-weight: 600;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    color: var(--text-mute); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; font-weight: 600; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
   }
   .kpi .value {
-    font-size: 26px;
-    font-weight: 700;
-    letter-spacing: -0.8px;
-    font-variant-numeric: tabular-nums;
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
+    font-size: 26px; font-weight: 700; letter-spacing: -0.8px;
+    font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 8px;
   }
-  .kpi .value .pct {
-    font-size: 14px;
-    font-weight: 600;
-    opacity: 0.9;
-  }
-  .kpi .delta {
-    font-size: 12px;
-    margin-top: 6px;
-    color: var(--text-mute);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .kpi-accent {
-    position: absolute;
-    top: 0; left: 0;
-    width: 3px; height: 100%;
-  }
+  .kpi .value .pct { font-size: 15px; font-weight: 600; opacity: 0.9; }
+  .kpi .delta { font-size: 12px; margin-top: 6px; color: var(--text-mute); }
+  .kpi-accent { position: absolute; top: 0; left: 0; width: 3px; height: 100%; }
   .kpi.blue .kpi-accent { background: var(--blue); }
   .kpi.green .kpi-accent { background: var(--green); }
   .kpi.red .kpi-accent { background: var(--red); }
   .kpi.purple .kpi-accent { background: var(--purple); }
 
-  .green { color: var(--green); }
-  .red { color: var(--red); }
-  .blue { color: var(--blue); }
-  .yellow { color: var(--yellow); }
+  .green { color: var(--green) !important; }
+  .red { color: var(--red) !important; }
+  .blue { color: var(--blue) !important; }
+  .yellow { color: var(--yellow) !important; }
   .muted { color: var(--text-mute); }
 
+  /* PANEL */
   .panel {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 20px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; margin-bottom: 20px;
   }
   .panel-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-    gap: 12px;
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; flex-wrap: wrap; gap: 12px;
   }
   .panel-title {
-    font-size: 14px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px;
   }
   .panel-title .icon-box {
-    width: 24px; height: 24px;
-    background: var(--blue-bg);
-    color: var(--blue);
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    width: 24px; height: 24px; background: var(--blue-bg); color: var(--blue);
+    border-radius: 6px; display: flex; align-items: center; justify-content: center;
     font-size: 12px;
   }
 
   select, button, input {
-    background: var(--bg-2);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 7px 12px;
-    font-size: 13px;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.15s;
-    outline: none;
+    background: var(--bg-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; font-family: inherit;
+    cursor: pointer; transition: all 0.15s; outline: none;
   }
   select:hover, button:hover { border-color: var(--border-light); }
   select:focus, input:focus { border-color: var(--blue); }
   button.active {
-    background: var(--blue);
-    color: #fff;
-    border-color: var(--blue);
-    font-weight: 600;
+    background: var(--blue); color: #fff; border-color: var(--blue); font-weight: 600;
   }
   .btn-group { display: flex; gap: 6px; }
 
@@ -263,73 +143,772 @@
 
   /* EXIT BREAKDOWN */
   .exit-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 14px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;
   }
   .exit-card {
-    background: var(--bg-2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
   }
   .exit-card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 14px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
   }
   .exit-engine-name {
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
+    font-size: 13px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;
   }
   .exit-engine-name.scalp { color: var(--scalp); }
   .exit-engine-name.day { color: var(--day); }
   .exit-engine-name.swing { color: var(--swing); }
   .exit-badge {
-    font-size: 10px;
-    padding: 3px 8px;
-    border-radius: 10px;
-    background: var(--blue-bg);
-    color: var(--blue);
-    font-weight: 600;
+    font-size: 10px; padding: 3px 8px; border-radius: 10px;
+    background: var(--blue-bg); color: var(--blue); font-weight: 600;
   }
   .exit-rows { display: flex; flex-direction: column; gap: 8px; }
   .exit-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; font-size: 13px;
   }
-  .exit-row .lbl {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-dim);
-  }
-  .exit-row .lbl .bullet {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-  .exit-row .val {
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    font-size: 14px;
-  }
+  .exit-row .lbl { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
+  .exit-row .lbl .bullet { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .exit-row .val { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 14px; }
 
   /* TABLE */
   .table-wrap { overflow-x: auto; margin: -8px; padding: 8px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead th {
-    text-align: left;
-    padding: 10px 12px;
-    color: var(--text-mute);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-weight: 600;
+    text-align: left; padding: 10px 12px; color: var(--text-mute);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+    font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  tbody td {
+    padding: 12px; border-bottom: 1px solid var(--border); white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  tbody tr { transition: background 0.1s; cursor: pointer; }
+  tbody tr:hover { background: var(--card-hover); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .engine-dot {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .engine-dot::before {
+    content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+  }
+  .engine-dot.scalp { color: var(--scalp); }
+  .engine-dot.day { color: var(--day); }
+  .engine-dot.swing { color: var(--swing); }
+
+  .side-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px;
+  }
+  .side-badge.buy { background: var(--green-bg); color: var(--green); }
+  .side-badge.sell { background: var(--red-bg); color: var(--red); }
+
+  .status-badge {
+    display: inline-block; font-size: 11px; font-weight: 600;
+    padding: 3px 9px; border-radius: 20px; text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .status-badge.open { background: var(--blue-bg); color: var(--blue); }
+  .status-badge.closed_tp1, .status-badge.closed_tp2 { background: var(--green-bg); color: var(--green); }
+  .status-badge.closed_sl { background: var(--red-bg); color: var(--red); }
+  .status-badge.closed_be { background: var(--yellow-bg); color: var(--yellow); }
+  .status-badge.closed_manual { background: var(--purple-bg); color: var(--purple); }
+
+  .icon-btn {
+    background: var(--bg-2); border: 1px solid var(--border); color: var(--text-dim);
+    width: 28px; height: 28px; border-radius: 6px; display: inline-flex;
+    align-items: center; justify-content: center; cursor: pointer;
+    font-size: 13px; transition: all 0.15s; padding: 0;
+  }
+  .icon-btn:hover { border-color: var(--blue); color: var(--blue); }
+  .icon-btn.danger:hover { border-color: var(--red); color: var(--red); }
+
+  /* MODAL */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center;
+    z-index: 1000; padding: 20px; backdrop-filter: blur(4px);
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: var(--card); border: 1px solid var(--border-light);
+    border-radius: 14px; padding: 24px; max-width: 520px; width: 100%;
+    max-height: 90vh; overflow-y: auto; animation: modalIn 0.2s ease;
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.95) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .modal-head {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
+  }
+  .modal-head h3 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .modal-close {
+    background: none; border: none; color: var(--text-mute); cursor: pointer;
+    font-size: 20px; padding: 0; width: 28px; height: 28px;
+  }
+  .modal-close:hover { color: var(--red); }
+  .detail-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px;
+  }
+  .detail-item { display: flex; flex-direction: column; gap: 3px; }
+  .detail-item .lbl {
+    color: var(--text-mute); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.4px; font-weight: 600;
+  }
+  .detail-item .val { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .detail-item.full { grid-column: 1 / -1; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 20px; }
+
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { padding: 16px; }
+    .page-title { font-size: 18px; }
+    .kpi .value { font-size: 22px; }
+  }
+
+  .fade-in { animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="logo">
+      <h1><span class="dot"></span> Crypto Bot</h1>
+      <p>Trading Dashboard</p>
+    </div>
+    <nav class="nav">
+      <div class="nav-section">Genel</div>
+      <button class="nav-item active" data-filter="all">
+        <span class="icon">📊</span> Tüm İşlemler
+      </button>
+      <button class="nav-item" data-filter="open">
+        <span class="icon">⏳</span> Açık Pozisyonlar
+      </button>
+      <button class="nav-item" data-filter="closed">
+        <span class="icon">✅</span> Kapananlar
+      </button>
+      <div class="nav-section">Motor Filtresi</div>
+      <button class="nav-item" data-engine="scalp">
+        <span class="icon">⚡</span> Scalp
+      </button>
+      <button class="nav-item" data-engine="day">
+        <span class="icon">📆</span> Day
+      </button>
+      <button class="nav-item" data-engine="swing">
+        <span class="icon">🌊</span> Swing
+      </button>
+    </nav>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <div class="topbar">
+      <div>
+        <div class="page-title">Dashboard</div>
+        <div class="page-sub" id="lastUpdate">Yükleniyor...</div>
+      </div>
+      <div class="status-pill">
+        <span class="dot"></span> Bot Çalışıyor
+      </div>
+    </div>
+
+    <!-- KPI -->
+    <div class="kpis" id="kpis"></div>
+
+    <!-- CHART -->
+    <div class="panel fade-in">
+      <div class="panel-head">
+        <div class="panel-title">
+          <span class="icon-box">📈</span> Fiyat Grafiği
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <select id="symbolSelect"></select>
+          <select id="timeframeSelect">
+            <option value="1m">1 Dakika</option>
+            <option value="15m" selected>15 Dakika</option>
+            <option value="1h">1 Saat</option>
+            <option value="4h">4 Saat</option>
+            <option value="1d">1 Gün</option>
+          </select>
+        </div>
+      </div>
+      <div id="focusIndicator" style="font-size:12px; color:var(--blue); margin-bottom:10px;"></div>
+      <div id="chart"></div>
+    </div>
+
+    <!-- CUMULATIVE -->
+    <div class="panel fade-in">
+      <div class="panel-head">
+        <div class="panel-title">
+          <span class="icon-box">💹</span> Kümülatif Kâr/Zarar
+        </div>
+        <div class="btn-group">
+          <button data-period="daily" class="active">Günlük</button>
+          <button data-period="weekly">Haftalık</button>
+          <button data-period="monthly">Aylık</button>
+        </div>
+      </div>
+      <div id="cumChart" style="height:220px;"></div>
+    </div>
+
+    <!-- EXIT BREAKDOWN -->
+    <div class="panel fade-in">
+      <div class="panel-head">
+        <div class="panel-title">
+          <span class="icon-box">🎯</span> Çıkış Dağılımı (Motor Bazlı)
+        </div>
+      </div>
+      <div class="exit-grid" id="exitBreakdown"></div>
+    </div>
+
+    <!-- TRADES -->
+    <div class="panel fade-in">
+      <div class="panel-head">
+        <div class="panel-title">
+          <span class="icon-box">📋</span> İşlemler
+        </div>
+        <div style="font-size:12px; color:var(--text-mute);" id="tradeCount"></div>
+      </div>
+      <div class="table-wrap">
+        <table id="tradesTable">
+          <thead>
+            <tr>
+              <th>Motor</th>
+              <th>Sembol</th>
+              <th>Yön</th>
+              <th>Giriş</th>
+              <th>Çıkış</th>
+              <th>Durum</th>
+              <th>PnL ($)</th>
+              <th>ROI (%)</th>
+              <th>Tarih</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="tradeModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h3 id="modalTitle">İşlem Detayı</h3>
+        <p id="modalSubtitle" style="color:var(--text-mute); font-size:12px;"></p>
+      </div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="detail-grid" id="modalDetails"></div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<script>
+const fmt$ = (n) => (n === null || n === undefined) ? '—' : (n >= 0 ? '+' : '-') + '$' + Math.abs(n).toFixed(2);
+const fmtAbs$ = (n) => (n === null || n === undefined) ? '—' : '$' + Number(n).toFixed(2);
+const fmtPct = (n) => (n === null || n === undefined) ? '—' : (n >= 0 ? '+' : '') + Number(n).toFixed(2) + '%';
+const colorPnl = (n) => n > 0 ? 'green' : (n < 0 ? 'red' : 'muted');
+const fmtPrice = (p) => {
+  if (p === null || p === undefined) return '—';
+  if (p >= 1000) return p.toFixed(2);
+  if (p >= 1) return p.toFixed(4);
+  if (p >= 0.01) return p.toFixed(6);
+  return p.toFixed(8);
+};
+const fmtDate = (d) => d ? new Date(d).toLocaleString('tr-TR', {
+  day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+}) : '—';
+
+// -------- KASA TAKİBİ (ROI hesabı için) --------
+// Her işlem açıldığında kasaya oranla ROI hesaplanır. Bunun için işlemin
+// açıldığı andaki kasa değerini bilmemiz gerek - basit yaklaşım: risk_usd
+// üzerinden değil, kapanış PnL / pozisyon marjı oranı kullanılır.
+
+// -------- SUMMARY --------
+async function loadSummary() {
+  const r = await fetch('/api/summary');
+  const s = await r.json();
+
+  const closedPnl = s.closed_pnl || 0;
+  const openPnl = s.open_pnl || 0;
+  const totalPnl = closedPnl + openPnl;
+  const startBal = s.starting_balance || 100;
+  const curBal = s.current_balance || startBal;
+
+  // ROI = kasanın başlangıca göre yüzdesel değişimi
+  const closedRoi = (closedPnl / startBal) * 100;
+  const totalRoi = (totalPnl / startBal) * 100;
+
+  document.getElementById('kpis').innerHTML = `
+    <div class="kpi blue">
+      <div class="kpi-accent"></div>
+      <div class="label">💰 Güncel Kasa</div>
+      <div class="value">${fmtAbs$(curBal)}</div>
+      <div class="delta">Başlangıç: ${fmtAbs$(startBal)}</div>
+    </div>
+    <div class="kpi ${closedPnl >= 0 ? 'green' : 'red'}">
+      <div class="kpi-accent"></div>
+      <div class="label">✅ Kapalı K/Z</div>
+      <div class="value">
+        <span class="${colorPnl(closedPnl)}">${fmt$(closedPnl)}</span>
+        <span class="pct ${colorPnl(closedRoi)}">${fmtPct(closedRoi)}</span>
+      </div>
+      <div class="delta">Realize edilmiş</div>
+    </div>
+    <div class="kpi ${openPnl >= 0 ? 'green' : 'red'}">
+      <div class="kpi-accent"></div>
+      <div class="label">⏳ Açık K/Z</div>
+      <div class="value">
+        <span class="${colorPnl(openPnl)}">${fmt$(openPnl)}</span>
+      </div>
+      <div class="delta">${s.open_positions_count} açık pozisyon</div>
+    </div>
+    <div class="kpi ${totalPnl >= 0 ? 'green' : 'red'}">
+      <div class="kpi-accent"></div>
+      <div class="label">📊 Toplam K/Z</div>
+      <div class="value">
+        <span class="${colorPnl(totalPnl)}">${fmt$(totalPnl)}</span>
+        <span class="pct ${colorPnl(totalRoi)}">${fmtPct(totalRoi)}</span>
+      </div>
+      <div class="delta">Kasa + Açık</div>
+    </div>
+  `;
+
+  document.getElementById('lastUpdate').textContent =
+    'Son güncelleme: ' + new Date().toLocaleTimeString('tr-TR');
+}
+
+// -------- SYMBOLS --------
+async function loadSymbols() {
+  const r = await fetch('/api/symbols');
+  const symbols = await r.json();
+  const sel = document.getElementById('symbolSelect');
+  sel.innerHTML = symbols.map(s => `<option value="${s}">${s}</option>`).join('');
+}
+
+// -------- CHART --------
+let chart, candleSeries, priceLines = [];
+let focusedTradeId = null;
+let allTradesCache = [];
+const ENGINE_TIMEFRAME = { scalp: '1m', day: '15m', swing: '4h' };
+
+function initChart() {
+  chart = LightweightCharts.createChart(document.getElementById('chart'), {
+    height: 420,
+    layout: {
+      background: { color: '#151b26' },
+      textColor: '#8b96a8',
+      fontFamily: 'Inter, sans-serif',
+    },
+    grid: {
+      vertLines: { color: '#1a2230' },
+      horzLines: { color: '#1a2230' },
+    },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#232b3a' },
+    rightPriceScale: { borderColor: '#232b3a' },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#26d07c', downColor: '#f85149', borderVisible: false,
+    wickUpColor: '#26d07c', wickDownColor: '#f85149',
+  });
+}
+
+function focusOnTrade(tradeId) {
+  const trade = allTradesCache.find(t => t.id === tradeId);
+  if (!trade) return;
+  focusedTradeId = tradeId;
+  document.getElementById('symbolSelect').value = trade.symbol;
+  document.getElementById('timeframeSelect').value = ENGINE_TIMEFRAME[trade.engine] || '15m';
+  loadChart();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function clearFocus() {
+  focusedTradeId = null;
+  loadChart();
+}
+
+async function loadChart() {
+  const symbol = document.getElementById('symbolSelect').value;
+  const timeframe = document.getElementById('timeframeSelect').value;
+  if (!symbol) return;
+
+  const r = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&limit=200`);
+  const candles = await r.json();
+  if (candles.error) return;
+  candleSeries.setData(candles);
+
+  priceLines.forEach(pl => candleSeries.removePriceLine(pl));
+  priceLines = [];
+
+  const focusEl = document.getElementById('focusIndicator');
+  let tradesToShow;
+
+  if (focusedTradeId) {
+    const t = allTradesCache.find(x => x.id === focusedTradeId);
+    tradesToShow = t ? [t] : [];
+    focusEl.innerHTML = t
+      ? `📌 İşlem #${t.id} (${t.engine.toUpperCase()}) izleniyor · <a href="#" onclick="clearFocus(); return false;" style="color:var(--blue);">Temizle</a>`
+      : '';
+  } else {
+    tradesToShow = allTradesCache.filter(t => t.symbol === symbol).slice(0, 5);
+    focusEl.innerHTML = '';
+  }
+
+  const markers = [];
+  tradesToShow.forEach(t => {
+    const entryTime = Math.floor(new Date(t.opened_at).getTime() / 1000);
+    markers.push({
+      time: entryTime,
+      position: t.side === 'buy' ? 'belowBar' : 'aboveBar',
+      color: t.side === 'buy' ? '#26d07c' : '#f85149',
+      shape: t.side === 'buy' ? 'arrowUp' : 'arrowDown',
+      text: `${t.engine} #${t.id}`
+    });
+    if (t.exit_price) {
+      const exitTime = Math.floor(new Date(t.closed_at).getTime() / 1000);
+      const exitColor = (t.pnl_usd || 0) >= 0 ? '#26d07c' : '#f85149';
+      markers.push({
+        time: exitTime, position: 'inBar', color: exitColor, shape: 'circle',
+        text: `${t.status.replace('closed_', '')} ${fmt$(t.pnl_usd)}`
+      });
+    }
+
+    const shouldDraw = focusedTradeId ? true : t.status === 'open';
+    if (shouldDraw) {
+      const ls = t.status === 'open' ? 0 : 2;
+      priceLines.push(candleSeries.createPriceLine({ price: t.stop_loss, color: '#f85149', lineWidth: 1, lineStyle: ls, title: `SL` }));
+      priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_1, color: '#26d07c', lineWidth: 1, lineStyle: ls, title: `TP1` }));
+      priceLines.push(candleSeries.createPriceLine({ price: t.take_profit_2, color: '#26d07c', lineWidth: 2, lineStyle: ls, title: `TP2` }));
+      priceLines.push(candleSeries.createPriceLine({ price: t.entry_price, color: '#8b96a8', lineWidth: 1, lineStyle: 3, title: `Giriş` }));
+    }
+  });
+  candleSeries.setMarkers(markers.sort((a, b) => a.time - b.time));
+}
+
+// -------- CUMULATIVE --------
+let cumChart, cumSeries;
+async function loadCumulative(period = 'daily') {
+  const r = await fetch(`/api/cumulative?period=${period}`);
+  const data = await r.json();
+  if (!cumChart) {
+    cumChart = LightweightCharts.createChart(document.getElementById('cumChart'), {
+      height: 220,
+      layout: { background: { color: '#151b26' }, textColor: '#8b96a8', fontFamily: 'Inter, sans-serif' },
+      grid: { vertLines: { color: '#1a2230' }, horzLines: { color: '#1a2230' } },
+      timeScale: { timeVisible: false, borderColor: '#232b3a' },
+      rightPriceScale: { borderColor: '#232b3a' },
+    });
+    cumSeries = cumChart.addLineSeries({
+      color: '#4d9fff', lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+    });
+  }
+  const points = data.map((d, i) => ({ time: i + 1, value: d.cumulative }));
+  cumSeries.setData(points);
+}
+
+// -------- EXIT BREAKDOWN --------
+async function loadExitBreakdown() {
+  const r = await fetch('/api/exit-breakdown');
+  const data = await r.json();
+  const el = document.getElementById('exitBreakdown');
+  const engines = ['scalp', 'day', 'swing'];
+  const engineLabels = { scalp: '⚡ Scalp', day: '📆 Day', swing: '🌊 Swing' };
+  const labels = [
+    { key: 'closed_tp1', label: 'TP1 Vuruldu', color: '#26d07c' },
+    { key: 'closed_tp2', label: 'TP2 Vuruldu', color: '#26d07c' },
+    { key: 'closed_be', label: 'Breakeven', color: '#e3b341' },
+    { key: 'closed_sl', label: 'Stop-Loss', color: '#f85149' },
+    { key: 'closed_manual', label: 'Erken Kapama', color: '#a371f7' },
+  ];
+
+  el.innerHTML = engines.map(eng => {
+    const stats = data[eng] || {};
+    const total = labels.reduce((s, l) => s + (stats[l.key] || 0), 0);
+    const rows = labels.map(l => `
+      <div class="exit-row">
+        <span class="lbl">
+          <span class="bullet" style="background:${l.color};"></span>
+          ${l.label}
+        </span>
+        <span class="val" style="color:${(stats[l.key] || 0) > 0 ? 'var(--text)' : 'var(--text-mute)'};">
+          ${stats[l.key] || 0}
+        </span>
+      </div>
+    `).join('');
+    return `
+      <div class="exit-card">
+        <div class="exit-card-head">
+          <div class="exit-engine-name ${eng}">${engineLabels[eng]}</div>
+          <div class="exit-badge">${total} işlem</div>
+        </div>
+        <div class="exit-rows">${rows}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// -------- TRADES --------
+let currentFilter = 'all';
+let currentEngineFilter = null;
+
+async function loadTrades() {
+  const r = await fetch('/api/trades?status=all');
+  const trades = await r.json();
+  allTradesCache = trades;
+  renderTrades();
+}
+
+function computeRoi(t) {
+  // ROI = PnL / (Pozisyon büyüklüğü * marj oranı) yaklaşımı.
+  // Basit ve doğru: kaldıraçsız ROI = (exit-entry)/entry * 100
+  if (!t.exit_price || !t.entry_price) return null;
+  const direction = t.side === 'buy' ? 1 : -1;
+  const priceMovePct = ((t.exit_price - t.entry_price) / t.entry_price) * 100 * direction;
+  // Kaldıraçlı ROI = priceMovePct * leverage
+  return priceMovePct * (t.leverage || 1);
+}
+
+function renderTrades() {
+  let filtered = allTradesCache;
+  if (currentFilter === 'open') filtered = filtered.filter(t => t.status === 'open');
+  else if (currentFilter === 'closed') filtered = filtered.filter(t => t.status !== 'open');
+  if (currentEngineFilter) filtered = filtered.filter(t => t.engine === currentEngineFilter);
+
+  const tbody = document.querySelector('#tradesTable tbody');
+  document.getElementById('tradeCount').textContent = `${filtered.length} işlem`;
+
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:32px; color:var(--text-mute);">Kayıt bulunamadı</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.slice(0, 100).map(t => {
+    const roi = computeRoi(t);
+    const roiClass = colorPnl(roi);
+    const pnlClass = colorPnl(t.pnl_usd);
+
+    return `
+      <tr onclick="openModal(${t.id})">
+        <td><span class="engine-dot ${t.engine}">${t.engine}</span></td>
+        <td style="font-weight:600;">${t.symbol}</td>
+        <td>
+          <span class="side-badge ${t.side}">
+            ${t.side === 'buy' ? '▲ LONG' : '▼ SHORT'}
+          </span>
+        </td>
+        <td class="muted">${fmtPrice(t.entry_price)}</td>
+        <td class="muted">${t.exit_price ? fmtPrice(t.exit_price) : '—'}</td>
+        <td><span class="status-badge ${t.status}">${t.status.replace('closed_', '').replace('open', 'açık')}</span></td>
+        <td class="${pnlClass}" style="font-weight:700;">${fmt$(t.pnl_usd)}</td>
+        <td class="${roiClass}" style="font-weight:700;">${fmtPct(roi)}</td>
+        <td class="muted" style="font-size:12px;">${fmtDate(t.opened_at)}</td>
+        <td onclick="event.stopPropagation();">
+          ${t.status === 'open' ? `<button class="icon-btn danger" onclick="closeTrade(${t.id})" title="Kapat">✕</button>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// -------- MODAL --------
+function openModal(tradeId) {
+  const t = allTradesCache.find(x => x.id === tradeId);
+  if (!t) return;
+
+  const roi = computeRoi(t);
+  const sideLabel = t.side === 'buy' ? '🟢 LONG' : '🔴 SHORT';
+  const statusLabel = {
+    'open': 'Açık',
+    'closed_tp1': 'TP1 Vuruldu',
+    'closed_tp2': 'TP2 Vuruldu',
+    'closed_sl': 'Stop-Loss',
+    'closed_be': 'Breakeven',
+    'closed_manual': 'Erken Kapatıldı',
+  }[t.status] || t.status;
+
+  document.getElementById('modalTitle').textContent = `${t.symbol} · #${t.id}`;
+  document.getElementById('modalSubtitle').textContent = `${t.engine.toUpperCase()} · ${sideLabel} · ${statusLabel}`;
+
+  document.getElementById('modalDetails').innerHTML = `
+    <div class="detail-item">
+      <span class="lbl">Giriş Fiyatı</span>
+      <span class="val">${fmtPrice(t.entry_price)}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">Çıkış Fiyatı</span>
+      <span class="val">${t.exit_price ? fmtPrice(t.exit_price) : '—'}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">Kaldıraç</span>
+      <span class="val">${t.leverage || '—'}x</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">Miktar</span>
+      <span class="val">${t.amount ? t.amount.toFixed(6) : '—'}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">Stop-Loss</span>
+      <span class="val red">${fmtPrice(t.stop_loss)}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">Breakeven?</span>
+      <span class="val">${t.moved_to_breakeven ? '✅ Evet' : '— Hayır'}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">TP1</span>
+      <span class="val green">${fmtPrice(t.take_profit_1)}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">TP2</span>
+      <span class="val green">${fmtPrice(t.take_profit_2)}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">PnL ($)</span>
+      <span class="val ${colorPnl(t.pnl_usd)}">${fmt$(t.pnl_usd)}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">ROI (%)</span>
+      <span class="val ${colorPnl(roi)}">${fmtPct(roi)}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">Açılış</span>
+      <span class="val" style="font-size:12px;">${fmtDate(t.opened_at)}</span>
+    </div>
+    <div class="detail-item">
+      <span class="lbl">Kapanış</span>
+      <span class="val" style="font-size:12px;">${fmtDate(t.closed_at)}</span>
+    </div>
+    <div class="detail-item full">
+      <span class="lbl">Confluence Skoru</span>
+      <span class="val">${t.confluence_score ?? '—'}</span>
+    </div>
+  `;
+
+  document.getElementById('modalActions').innerHTML = `
+    <button onclick="focusOnTrade(${t.id}); closeModal();" style="flex:1;">📈 Grafikte Göster</button>
+    ${t.status === 'open' ? `<button class="danger" onclick="closeTrade(${t.id}); closeModal();" style="background:var(--red-bg); color:var(--red); border-color:var(--red); flex:1;">Pozisyonu Kapat</button>` : ''}
+  `;
+
+  document.getElementById('tradeModal').classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('tradeModal').classList.remove('active');
+}
+
+// -------- CLOSE TRADE --------
+async function closeTrade(id) {
+  if (!confirm('Bu pozisyonu manuel kapatmak istediğine emin misin?')) return;
+  try {
+    const r = await fetch(`/api/trades/${id}/close`, { method: 'POST' });
+    const data = await r.json();
+    if (data.success) {
+      loadSummary(); loadTrades();
+    } else {
+      alert('Hata: ' + (data.detail || 'bilinmeyen hata'));
+    }
+  } catch (e) {
+    alert('İstek başarısız: ' + e);
+  }
+}
+
+// -------- FILTER HANDLERS --------
+document.querySelectorAll('[data-filter]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = btn.dataset.filter;
+    renderTrades();
+  });
+});
+
+document.querySelectorAll('[data-engine]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const eng = btn.dataset.engine;
+    if (currentEngineFilter === eng) {
+      // aynı motora tekrar tıklandı -> filtreyi kaldır
+      currentEngineFilter = null;
+      btn.classList.remove('active');
+    } else {
+      document.querySelectorAll('[data-engine]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentEngineFilter = eng;
+    }
+    renderTrades();
+  });
+});
+
+document.querySelectorAll('[data-period]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-period]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadCumulative(btn.dataset.period);
+  });
+});
+
+document.getElementById('symbolSelect').addEventListener('change', loadChart);
+document.getElementById('timeframeSelect').addEventListener('change', loadChart);
+
+// Modal dışına tıklayınca kapansın
+document.getElementById('tradeModal').addEventListener('click', (e) => {
+  if (e.target.id === 'tradeModal') closeModal();
+});
+
+// ESC ile kapansın
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
+
+// -------- INIT --------
+async function safe(fn, label) {
+  try { await fn(); } catch (e) { console.error(`${label} yüklenemedi:`, e); }
+}
+
+async function init() {
+  await safe(loadSummary, 'Özet');
+  await safe(loadSymbols, 'Semboller');
+  await safe(loadTrades, 'İşlemler');
+  try {
+    initChart();
+    await safe(loadChart, 'Grafik');
+  } catch (e) {
+    console.error('Grafik başlatılamadı:', e);
+  }
+  await safe(() => loadCumulative(), 'Kümülatif');
+  await safe(loadExitBreakdown, 'Dağılım');
+
+  setInterval(() => {
+    safe(loadSummary);
+    safe(loadTrades).then(() => safe(loadChart));
+    safe(loadExitBreakdown);
+  }, 30000);
+}
+
+init();
+</script>
+</body>
+</html>
