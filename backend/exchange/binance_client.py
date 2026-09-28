@@ -15,6 +15,10 @@ from backend import config
 logger = logging.getLogger("binance_client")
 
 
+class UnprotectedPositionError(Exception):
+    """Pozisyon açıldı, stop-loss konulamadı ve pozisyon da geri kapatılamadı."""
+
+
 class BinanceClient:
     def __init__(self):
         self.exchange = ccxt.binance({
@@ -198,11 +202,37 @@ class BinanceClient:
         sl_algo_id, tp_algo_id = None, None
 
         if stop_loss:
-            try:
-                resp = self._place_algo_stop_order(symbol, side, amount, stop_loss, order_type="STOP_MARKET")
-                sl_algo_id = resp.get("algoId")
-            except Exception as e:
-                logger.error(f"❌ {symbol}: Stop-loss emri KONULAMADI, pozisyon korumasız! Hata: {e}")
+            # Borsa ara sıra 429/geçici hata verebiliyor (Render'ın paylaşımlı IP'si). Stop-loss
+            # yerleşmezse pozisyon korumasız kalır, bu yüzden önce yeniden deniyoruz.
+            sl_placed = False
+            last_error = None
+            for attempt in range(3):
+                try:
+                    resp = self._place_algo_stop_order(symbol, side, amount, stop_loss, order_type="STOP_MARKET")
+                    sl_algo_id = resp.get("algoId")
+                    sl_placed = True
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"{symbol}: stop-loss denemesi {attempt + 1}/3 başarısız: {e}")
+                    time.sleep(1.5 * (attempt + 1))
+
+            if not sl_placed:
+                # Güvenlik: korumasız pozisyon tutmaktansa geri kapat.
+                closed = False
+                for attempt in range(3):
+                    try:
+                        self.close_position(symbol, side, amount)
+                        closed = True
+                        break
+                    except Exception as e:
+                        logger.error(f"{symbol}: korumasız pozisyon kapatma denemesi {attempt + 1}/3 başarısız: {e}")
+                        time.sleep(1.5 * (attempt + 1))
+                if closed:
+                    raise RuntimeError(f"{symbol}: stop-loss konulamadı, pozisyon güvenlik için geri kapatıldı. Hata: {last_error}")
+                raise UnprotectedPositionError(
+                    f"{symbol} {side} {amount}: stop-loss konulamadı VE pozisyon kapatılamadı, "
+                    f"pozisyon KORUMASIZ. Elle kapatın. Hata: {last_error}")
         if take_profit:
             try:
                 resp = self._place_algo_stop_order(symbol, side, amount, take_profit, order_type="TAKE_PROFIT")
