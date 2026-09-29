@@ -38,7 +38,7 @@ CAPITAL_ALLOCATION = {
     "swing": 0.25,
 }
 
-MIN_RISK_USD = float(os.getenv("MIN_RISK_USD", "10"))
+MIN_RISK_USD = float(os.getenv("MIN_RISK_USD", "5"))   # 10 -> 5 (daha küçük risk)
 RISK_PERCENT_PER_TRADE = {
     "scalp": 0.015,
     "day": 0.02,
@@ -62,14 +62,17 @@ RISK_REWARD = {
 }
 
 # ----------------------------------------------------------------------
-# KILL-SWITCH (GÜVENLİK LİMİTLERİ) - SIKILAŞTIRILDI
+# KILL-SWITCH - TAMAMEN DEVRE DIŞI
 # ----------------------------------------------------------------------
-DAILY_MAX_LOSS_PERCENT = 0.15        # %30 -> %15 (daha erken dur)
-ENGINE_CONSECUTIVE_LOSS_LIMIT = 2    # 3 -> 2 (daha erken dur)
-ENGINE_PAUSE_DURATION_MINUTES = 120
+# 1.0 = %100 kayıp (pratikte asla tetiklenmez)
+DAILY_MAX_LOSS_PERCENT = 1.0
+
+# Motor bazlı ardışık kayıp limiti - pratikte asla tetiklenmez
+ENGINE_CONSECUTIVE_LOSS_LIMIT = 999
+ENGINE_PAUSE_DURATION_MINUTES = 1
 
 # ----------------------------------------------------------------------
-# CONFLUENCE (SİNYAL ONAY) EŞİKLERİ - DÜŞÜRÜLDÜ
+# CONFLUENCE (SİNYAL ONAY) EŞİKLERİ
 # ----------------------------------------------------------------------
 ENGINE_STRATEGIES = {
     "scalp": ["ema", "vwap", "support_resistance"],
@@ -78,9 +81,9 @@ ENGINE_STRATEGIES = {
 }
 
 CONFLUENCE_THRESHOLD = {
-    "scalp": 2.0,   # 2.5 -> 2.0
-    "day": 2.0,     # 2.5 -> 2.0
-    "swing": 1.5,   # 2.0 -> 1.5
+    "scalp": 2.0,
+    "day": 2.0,
+    "swing": 1.5,
 }
 
 # ----------------------------------------------------------------------
@@ -109,7 +112,7 @@ SYMBOL_COOLDOWN_MINUTES = 5
 CORRELATED_GROUPS = [
     {"BTC/USDT", "ETH/USDT"},
 ]
-MAX_SAME_DIRECTION_EXPOSURE_PERCENT = 0.25  # 0.15 -> 0.25 (daha esnek)
+MAX_SAME_DIRECTION_EXPOSURE_PERCENT = 0.25
 
 # ----------------------------------------------------------------------
 # HABER/MAKRO FİLTRESİ
@@ -126,7 +129,6 @@ SL_ATR_MULTIPLIER = {
     "swing": 2.5,
 }
 
-# %0.4 -> %0.8 (daha geniş taban, gereksiz stop patlamasını önler)
 MIN_STOP_DISTANCE_PERCENT = 0.008
 
 # ----------------------------------------------------------------------
@@ -161,34 +163,30 @@ NEWS_RELEVANT_CURRENCIES = {"USD"}
 POSITION_MONITOR_INTERVAL_SECONDS = 90
 API_REQUEST_SPACING_SECONDS = 0.3
 
-# Momentum geri çekilme eşiği (kârın ne kadarı geri verilirse kapat)
+# Momentum geri çekilme eşiği
 MOMENTUM_REVERSAL_RETRACE_PERCENT = 0.40
 
-# ======================================================================
-# KADEMELİ KÂR KORUMA SİSTEMİ (YENİ)
-# ======================================================================
-# Fiyat, stop mesafesinin şu oranı kadar kâra geçtiğinde izlemeye başla.
-# Bu orana ulaşmadan hiçbir koruma devreye girmez (gürültüden korunma).
+# ----------------------------------------------------------------------
+# KADEMELİ KÂR KORUMA SİSTEMİ
+# ----------------------------------------------------------------------
 MOMENTUM_MIN_FAVORABLE_FRACTION = {
-    "scalp": 0.5,   # Scalp için de aktif (önceki: None)
+    "scalp": 0.5,
     "day": 0.5,
     "swing": 0.5,
 }
 
-# KADEMELİ KORUMA SEVİYELERİ
-# Fiyat stop mesafesinin şu katı kadar kâra geçtiğinde stop'u nereye çekeceğimizi belirler.
-# (ratio: favorable_move / stop_distance)
+# Kademeli kâr kilitleme seviyeleri
+# (favorable_ratio_eşiği, stop_yeni_seviye_çarpanı) -> yeni_stop = entry + (stop_dist * çarpan)
 PROFIT_LOCK_LEVELS = [
-    # (favorable_ratio_eşiği, stop_yeni_seviye_çarpanı)  -> yeni_stop = entry + (stop_dist * çarpan)
-    (0.50, 0.00),   # %50 kâra geçince  -> stop = giriş (breakeven)
-    (0.75, 0.25),   # %75 kâra geçince  -> stop = giriş + stop_dist * 0.25
-    (1.00, 0.50),   # TP1 seviyesi      -> stop = giriş + stop_dist * 0.50 (kârın yarısı kilitli)
-    (1.50, 0.75),   # %150 kâr          -> stop = giriş + stop_dist * 0.75
-    (2.00, 1.00),   # TP2 seviyesi      -> stop = giriş + stop_dist * 1.00
+    (0.50, 0.00),   # %50 kâra geçince -> stop = giriş (breakeven)
+    (0.75, 0.25),   # %75 kâra geçince -> stop = giriş + stop_dist * 0.25
+    (1.00, 0.50),   # TP1 seviyesi -> stop = giriş + stop_dist * 0.50
+    (1.50, 0.75),   # %150 kâr -> stop = giriş + stop_dist * 0.75
+    (2.00, 1.00),   # TP2 seviyesi -> stop = giriş + stop_dist * 1.00
 ]
 
 # Kâr koruma kapatma: en iyi fiyattan bu oran kadar geri çekilirse kapat
-PROFIT_PROTECT_CLOSE_RETRACE = 0.40   # %40 geri çekilme
+PROFIT_PROTECT_CLOSE_RETRACE = 0.40
 
 # Bu kadar mumluk geçmiş, "en iyi favorable fiyatı" hesaplamak için taranır
 MOMENTUM_LOOKBACK_CANDLES = 30
