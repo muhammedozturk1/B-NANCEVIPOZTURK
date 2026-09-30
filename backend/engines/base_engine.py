@@ -28,6 +28,9 @@ from backend.telegram import notifier
 
 logger = logging.getLogger("base_engine")
 
+# Stop mesafesi fiyatın bu yüzdesini aşarsa işlem açılmaz (config.MAX_STOP_PCT ile değiştirilebilir)
+MAX_STOP_PCT_DEFAULT = {"scalp": 0.02, "day": 0.035, "swing": 0.07}
+
 _last_processed_bar = {}   # (engine, symbol) -> son değerlendirilen mum ts (aynı mumda 2 kez girme)
 _last_ready_msg = {}
 
@@ -126,6 +129,14 @@ def _open_trade(engine_name: str, symbol: str, signal: dict, client) -> bool:
     atr_pct = signal["atr"] / signal["ref_price"]
     dist = position_sizing.stop_distance(engine_name, price, atr_pct * price)
     tp_dist = dist * config.EXIT_PARAMS[engine_name]["tp_r"]
+
+    # Stop çok genişse (pompalanan / aşırı oynak coin) işlem açma.
+    # Örn. MOVR: scalp işleminde stop %4.4 çıkmıştı; gürültüyle vurulma ihtimali çok yüksek.
+    max_stop_pct = getattr(config, "MAX_STOP_PCT", MAX_STOP_PCT_DEFAULT)[engine_name]
+    if dist / price > max_stop_pct:
+        logger.info(f"[{engine_name}] {symbol}: stop %{dist / price * 100:.1f} çok geniş "
+                    f"(limit %{max_stop_pct * 100:.1f}), aşırı oynak coin - atlandı.")
+        return False
 
     balance = repository.get_virtual_balance()
     sizing = position_sizing.calculate_position(engine_name, price, dist, balance)
