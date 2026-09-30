@@ -1,5 +1,8 @@
 ccxt==4.3.87
 pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.5.2
+joblib==1.4.2
 SQLAlchemy==2.0.30
 python-dotenv==1.0.1
 APScheduler==3.10.4

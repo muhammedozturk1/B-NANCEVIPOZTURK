@@ -1,5 +1,8 @@
 """
-FAZ 2 - ANA ÇALIŞMA DÖNGÜSÜ
+ANA ÇALIŞMA DÖNGÜSÜ (v2)
+
+Motorlar artık sabit aralıkla değil, kendi mumlarının KAPANIŞINA hizalı
+çalışır (5m motor: her 5 dakikanın 10. saniyesinde).
 
 Faz 1'deki "bir kere çalışıp kapanan" test scriptinin yerini alıyor.
 Artık bot sürekli çalışır ve 3 motoru kendi zaman dilimlerine göre
@@ -77,6 +80,14 @@ def startup_checks(client) -> bool:
     return True
 
 
+CRON_FOR_TF = {
+    # Mum kapanışından 10 sn sonra çalış -> her mum TAM OLARAK bir kez değerlendirilir
+    "5m": {"minute": "*/5", "second": 10},
+    "15m": {"minute": "*/15", "second": 10},
+    "1h": {"minute": 0, "second": 15},
+}
+
+
 def main():
     client = BinanceClient()
 
@@ -84,32 +95,31 @@ def main():
         logger.error("Başlangıç kontrolleri başarısız, bot durduruluyor.")
         return
 
+    from backend.ai import model as ai_model
+    engines = {"scalp": scalp, "day": day, "swing": swing}
     scheduler = BlockingScheduler(timezone="UTC")
 
-    scheduler.add_job(run_engine_safely, "interval", minutes=1,
-                       args=[scalp, client], id="scalp_engine")
-    scheduler.add_job(run_engine_safely, "interval", minutes=15,
-                       args=[day, client], id="day_engine")
-    scheduler.add_job(run_engine_safely, "interval", hours=4,
-                       args=[swing, client], id="swing_engine")
+    for name, module in engines.items():
+        if not config.ENGINE_ENABLED.get(name):
+            logger.info(f"[{name}] motor KAPALI (config.ENGINE_ENABLED).")
+            continue
+        ready, msg = ai_model.engine_ready(name)
+        logger.info(f"[{name}] {config.ENGINE_TIMEFRAMES[name]} | AI: {msg}")
+        tf = config.ENGINE_TIMEFRAMES[name]["entry"]
+        scheduler.add_job(run_engine_safely, "cron", args=[module, client], id=f"{name}_engine",
+                          max_instances=1, coalesce=True, **CRON_FOR_TF[tf])
+
     scheduler.add_job(run_position_monitor_safely, "interval",
-                       seconds=config.POSITION_MONITOR_INTERVAL_SECONDS,
-                       args=[client], id="position_monitor")
+                      seconds=config.POSITION_MONITOR_INTERVAL_SECONDS,
+                      args=[client], id="position_monitor", max_instances=1, coalesce=True)
     scheduler.add_job(run_heartbeat_safely, "interval",
-                       minutes=config.HEARTBEAT_INTERVAL_MINUTES, id="heartbeat")
+                      minutes=config.HEARTBEAT_INTERVAL_MINUTES, id="heartbeat")
     scheduler.add_job(run_weekly_summary_safely, "cron",
-                       day_of_week=config.WEEKLY_SUMMARY_DAY_OF_WEEK,
-                       hour=config.WEEKLY_SUMMARY_HOUR_UTC, id="weekly_summary")
+                      day_of_week=config.WEEKLY_SUMMARY_DAY_OF_WEEK,
+                      hour=config.WEEKLY_SUMMARY_HOUR_UTC, id="weekly_summary")
 
-    logger.info(f"Zamanlayıcı başlatıldı: Scalp(1dk) / Day(15dk) / Swing(4sa) / "
-                f"Pozisyon İzleme({config.POSITION_MONITOR_INTERVAL_SECONDS}sn) / "
-                f"Heartbeat({config.HEARTBEAT_INTERVAL_MINUTES}dk) / Haftalık Özet(Pzt {config.WEEKLY_SUMMARY_HOUR_UTC}:00 UTC)")
-
-    # İlk çalıştırmada hemen bir kez tetikle, sonra periyodik devam etsin
-    run_engine_safely(scalp, client)
-    run_engine_safely(day, client)
-    run_engine_safely(swing, client)
-
+    logger.info(f"Zamanlayıcı başlatıldı | AI modu: {config.AI_MODE} | işlem başı risk: "
+                f"{config.RISK_PERCENT_PER_TRADE} | günlük zarar limiti: %{config.DAILY_MAX_LOSS_PERCENT*100:.0f}")
     scheduler.start()
 
 
