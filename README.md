@@ -1,4 +1,86 @@
-# Kripto Trading Bot - Kurulum Rehberi (FAZ 1)
+# Kripto Trading Bot v2 — AI Filtreli, "Küçük ama Net Kazanç" Modu
+
+## v2'de ne değişti?
+
+**Düzeltilen hatalar**
+- Sinyaller artık sadece **kapanmış mumlarla** hesaplanıyor. Eskiden oluşmakta olan mum kullanılıyordu ve sinyaller kayboluyordu.
+- Pivotlar önceki **tam günden** hesaplanıyor. Eski kod tek mumdan hesapladığı için sürekli sahte "long" sinyali üretiyordu.
+- VWAP her UTC gününde **sıfırlanıyor**.
+- **Komisyon ve kayma** her hesapta var: backtest, AI etiketi ve PnL. Kapanan işlemin gerçek net PnL'i borsadan okunuyor.
+- SL/TP **gerçek dolum fiyatına** göre konuyor.
+- Stop taşınırken önce yeni stop konuyor, sonra eskisi iptal ediliyor. Böylece pozisyon arada korumasız kalmıyor.
+- Dashboard ve bot aynı işlemi iki kez kasaya işleyemiyor.
+
+**Strateji / çıkış**
+- "0.5R'de başa-baş, %40 geri çekilmede kapat" sistemi kaldırıldı. Kazançları kırpıp zararları tam bırakıyordu.
+- Tek hedef: **1.2R (scalp) / 1.5R (day)**. Ayrıca bir zaman stopu var: scalp 3 saat, day 8 saat.
+- 1 dakikalık scalp kaldırıldı. Scalp artık 5m/1h, day 15m/4h zaman dilimlerinde çalışıyor.
+- Birbiriyle çelişen oylama sistemi yerine 3 net kurulum var: `trend_pullback`, `range_reversion`, `liquidity_sweep`.
+
+**Risk**
+- İşlem başına risk kasanın **%1**'i. Eski ayarda sabit 5$/10$ vardı, bu 100$ kasada %5-10 risk demekti.
+- Kill-switch tekrar açık: günlük %5 zarar veya art arda 4 kayıpta motor 4 saat duruyor.
+- Toplam açık risk en fazla %4, aynı yöndeki (tüm altcoinler dahil) risk en fazla %3.
+- Kaldıraç otomatik: marja sığan en düşük kaldıraç seçiliyor, üst sınır 10x. Likidasyon fiyatı stoptan en az 3 kat uzakta tutuluyor.
+
+**Yapay zeka**
+- Her aday sinyal için model şu soruya cevap veriyor: "Bu işlem komisyon sonrası kâr eder mi?" (Gradient Boosting)
+- Model gerçek geçmiş veride eğitiliyor ve **hiç görmediği bir test döneminde** sınanıyor.
+- **Testi geçemeyen model onay almaz. Onaysız modelle bot o motorda işlem AÇMAZ** (`AI_MODE=required`).
+- Açılan her işlemin özellikleri veritabanına kaydediliyor (`features_json`). İleride bu kayıtlarla gerçek işlemlerden yeniden eğitim yapılabilir.
+
+---
+
+## ADIM A: Modeli eğit (kendi bilgisayarında)
+
+İnternet bağlantısı gerekir, API key gerekmez. Gerçek Binance verisi indirilir.
+
+```bash
+pip install -r requirements.txt
+python -m backend.ai.train --engine scalp --days 365
+python -m backend.ai.train --engine day --days 730
+```
+
+İlk çalıştırma veri indirdiği için 10-30 dakika sürebilir. Sonraki çalıştırmalar `data/` klasöründeki önbelleği kullanır.
+
+## ADIM B: Raporu oku
+
+Ekranda ve `models/<motor>_report.json` dosyasında şunlar yazar:
+
+- **AUC**: 0.50 yazı-tura demektir. 0.55'in üstü anlamlı bir sinyal var demektir. 0.70'in üstü şüphelidir, bana bildir.
+- **AI'sız / AI filtreli**: test dönemindeki işlem sayısı, kazanma oranı, ortalama R (komisyon sonrası), profit factor, maksimum düşüş.
+- **✅ ONAYLANDI** veya **❌ onaylanmadı** sonucu.
+
+"Onaylanmadı" çıkarsa bot o motorla işlem açmaz. Bu bir hata değil, koruma: stratejinin o piyasada avantajı yok demektir, para kaybetmeden öğrenmiş olursun.
+
+## ADIM C: Modeli GitHub'a yükle ve deploy et
+
+Render modeli repodan okur. Onaylanan modelleri commit'le:
+
+```bash
+git add models/ && git commit -m "AI modelleri" && git push
+```
+
+## ADIM D: En az 2-4 hafta testnette izle
+
+Testnet sonuçlarını raporla karşılaştır. Kazanma oranı ve ortalama R, test dönemine yakın olmalı. Çok daha kötüyse canlıya geçme.
+
+## Bakım
+
+- Modeli **ayda bir** yeniden eğit, çünkü piyasa rejimi değişiyor.
+- `config.py` içinde `EXIT_PARAMS` veya `ENGINE_SETUPS` değiştirirsen **mutlaka yeniden eğit**. Model eski kurallara göre eğitilmişse yanlış karar verir.
+- `AI_MIN_PROBABILITY` ile daha seçici olabilirsin: daha az ama daha kaliteli işlem.
+
+## ⚠️ Dürüst uyarılar
+
+- Backtest geçmişi ölçer, geleceği garanti etmez.
+- Scalp'ta komisyon ve kayma işlem başına yaklaşık **0.2R** tutar. Avantajı olmayan bir sinyal bu yüzden kesin kaybettirir. AI filtresinin görevi tam olarak bunu elemek.
+- Eğitimde bugünün en hacimli coinleri kullanılıyor. Bu durum sonuçları biraz iyimser gösterebilir (hayatta kalma yanılgısı).
+- Gerçek paraya geçmeden önce kaybetmeyi göze alabileceğin küçük bir tutarla başla.
+
+---
+
+# İlk Kurulum Rehberi (Faz 1 - hâlâ geçerli)
 
 Bu rehber, hiç deneyimin olmadığını varsayarak yazıldı. Her adımı sırayla, atlamadan yap.
 
