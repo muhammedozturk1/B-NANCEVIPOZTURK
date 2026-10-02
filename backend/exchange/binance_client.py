@@ -315,7 +315,7 @@ class BinanceClient:
     # DİNAMİK PİYASA TARAMASI
     # ------------------------------------------------------------------
     def fetch_top_symbols(self, limit: int, min_volume: float, quote: str = "USDT",
-                           exclude_base_assets: set = None) -> list:
+                           exclude_base_assets: set = None, allowed_base_assets: set = None) -> list:
         """
         Binance Futures'taki tüm <quote> paritelerini 24s hacme göre sıralar,
         minimum hacim ve dışlanan bazları (stablecoin'ler vb.) filtreleyip
@@ -337,6 +337,8 @@ class BinanceClient:
             base_asset = base_symbol.split("/")[0]
             if base_asset in exclude_base_assets:
                 continue
+            if allowed_base_assets and base_asset not in allowed_base_assets:
+                continue  # emtia / hisse / meme coin -> atla
 
             volume = ticker.get("quoteVolume") or 0
             if volume < min_volume:

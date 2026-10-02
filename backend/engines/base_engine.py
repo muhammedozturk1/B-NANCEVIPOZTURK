@@ -50,7 +50,7 @@ def evaluate_symbol(engine_name: str, symbol: str, client):
     _last_processed_bar[key] = last_ts
 
     frame = feat.build_frame(entry, confirm, tfs["entry"], tfs["confirm"])
-    sides, names = st.detect(frame, config.ENGINE_SETUPS[engine_name])
+    sides, names = st.detect(frame, ai_model.setups_for(engine_name))
     side_val, setup = int(sides[-1]), names[-1]
     if side_val == 0:
         return None

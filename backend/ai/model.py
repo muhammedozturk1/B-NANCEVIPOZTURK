@@ -61,3 +61,13 @@ def evaluate(engine: str, vector: dict):
     prob = float(bundle["model"].predict_proba(X)[0, 1])
     threshold = max(bundle["threshold"], config.AI_MIN_PROBABILITY)
     return prob >= threshold, prob
+
+
+def setups_for(engine: str) -> list:
+    """Onaylı model varsa, modelin doğrulama döneminde kârlı bulduğu kurulumlar;
+    yoksa config.ENGINE_SETUPS."""
+    if config.AI_MODE != "off":
+        bundle = load(engine)
+        if bundle and bundle.get("approved") and bundle.get("setups"):
+            return list(bundle["setups"])
+    return list(config.ENGINE_SETUPS[engine])

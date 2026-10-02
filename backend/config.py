@@ -70,7 +70,9 @@ ENGINE_TIMEFRAMES = {
     "swing": {"entry": "1h", "confirm": "1d"},
 }
 
-# Her motorun kullanabileceği giriş kurulumları (backend/strategies/setups.py)
+# Her motorun kullanabileceği giriş kurulumları (backend/strategies/setups.py).
+# NOT: Onaylı bir AI modeli varsa, bot bu listeyi DEĞİL modelin eğitimde
+# doğrulama döneminde kârlı bulduğu kurulumları kullanır (model dosyasında saklı).
 ENGINE_SETUPS = {
     "scalp": ["range_reversion", "liquidity_sweep", "trend_pullback"],
     "day": ["trend_pullback", "liquidity_sweep", "range_reversion"],
@@ -140,6 +142,14 @@ TOP_SYMBOLS_COUNT = 15
 MIN_24H_VOLUME_USDT = 100_000_000
 SYMBOL_CACHE_TTL_SECONDS = 1800
 EXCLUDE_BASE_ASSETS = {"USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP"}
+# Sadece bu likit KRİPTO paralar taranır. Binance Futures'ta artık altın (XAU),
+# gümüş (XAG), petrol (CL), hisse senetleri (SNDK, SOXL...) ve meme coinler de var;
+# bunlar farklı saatlerde işlem görür / farklı davranır ve modeli bozar.
+CRYPTO_UNIVERSE = {
+    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "LINK", "AVAX", "LTC",
+    "SUI", "TRX", "DOT", "BCH", "NEAR", "APT", "ARB", "OP", "TON", "ATOM",
+    "FIL", "UNI", "ETC", "AAVE",
+}
 FALLBACK_SYMBOLS = ["BTC/USDT", "ETH/USDT"]
 SYMBOL_COOLDOWN_MINUTES = 15
 

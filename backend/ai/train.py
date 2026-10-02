@@ -49,8 +49,11 @@ def top_symbols(ex, count: int) -> list:
     rows = []
     for sym, t in tickers.items():
         base = sym.split(":")[0]
-        if not base.endswith("/USDT") or base.split("/")[0] in config.EXCLUDE_BASE_ASSETS:
+        asset = base.split("/")[0]
+        if not base.endswith("/USDT") or asset in config.EXCLUDE_BASE_ASSETS:
             continue
+        if asset not in config.CRYPTO_UNIVERSE:
+            continue  # altın, petrol, hisse, meme coin -> eğitime alma
         rows.append((base, t.get("quoteVolume") or 0))
     rows.sort(key=lambda x: -x[1])
     seen, out = set(), []
@@ -84,7 +87,8 @@ def load_ohlcv(ex, symbol: str, tf: str, days: int, offline: bool) -> list:
                 break
         if rows:
             new = pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close", "volume"])
-            cached = pd.concat([cached, new]).drop_duplicates("ts").sort_values("ts")
+            cached = new if cached.empty else pd.concat([cached, new])
+            cached = cached.drop_duplicates("ts").sort_values("ts")
             # son (kapanmamış) mumu kaydetme
             cached = cached[cached["ts"] + TF_MS[tf] <= time.time() * 1000]
             cached.to_csv(path, index=False)
@@ -118,6 +122,19 @@ def pick_threshold(val: pd.DataFrame, probs: np.ndarray, min_trades: int):
         if sel["net_r"].mean() > 0 and total > best_total:
             best_t, best_total = round(float(t), 2), total
     return best_t
+
+
+def select_setups(val: pd.DataFrame, p_val: np.ndarray, min_trades: int = 15) -> list:
+    """Kurulum seçimi DOĞRULAMA döneminde yapılır (test dönemine bakılmaz).
+    Her kurulum için ayrı ayrı: AI filtresiyle kârlı bir eşik bulunabiliyor mu?"""
+    keep = []
+    for name in sorted(val["setup"].unique()):
+        mask = (val["setup"] == name).values
+        if mask.sum() < min_trades:
+            continue
+        if pick_threshold(val[mask], p_val[mask], min_trades) is not None:
+            keep.append(name)
+    return keep
 
 
 def make_model():
@@ -179,17 +196,21 @@ def main():
     auc_test = roc_auc_score((test["net_r"] > 0).astype(int), p_test)
 
     appr = config.AI_APPROVAL
-    threshold = pick_threshold(val, p_val, min_trades=max(20, appr["min_test_trades"] // 2))
+    setups_kept = select_setups(val, p_val)
+    print(f"\nDoğrulama döneminde kârlı bulunan kurulumlar: {setups_kept or 'YOK'}")
 
     base_test = ds.performance(ds.sequential_filter(test))
+    threshold, ai_test, by_setup = None, {"trades": 0}, {}
+    if setups_kept:
+        vmask = val["setup"].isin(setups_kept).values
+        threshold = pick_threshold(val[vmask], p_val[vmask], min_trades=max(20, appr["min_test_trades"] // 2))
     if threshold is not None:
         t = test.copy()
         t["p"] = p_test
+        t = t[t["setup"].isin(setups_kept)]
         ai_sel = ds.sequential_filter(t[t["p"] >= threshold])
         ai_test = ds.performance(ai_sel)
         by_setup = {k: ds.performance(g) for k, g in ai_sel.groupby("setup")}
-    else:
-        ai_test, by_setup = {"trades": 0}, {}
 
     approved = (
         threshold is not None
@@ -202,7 +223,7 @@ def main():
         "engine": engine, "timeframes": tfs, "days": args.days, "symbols": symbols,
         "exit_params": config.EXIT_PARAMS[engine], "cost_per_side": config.COST_PER_SIDE,
         "auc_validation": round(float(auc_val), 3), "auc_test": round(float(auc_test), 3),
-        "threshold": threshold,
+        "threshold": threshold, "setups": setups_kept,
         "test_without_ai": base_test, "test_with_ai": ai_test, "test_with_ai_by_setup": by_setup,
         "approved": bool(approved),
         "trained_at": datetime.now(timezone.utc).isoformat(),
@@ -211,7 +232,7 @@ def main():
     print("\n--- TEST DÖNEMİ (model bu veriyi hiç görmedi) ---")
     print(f"AUC (0.5 = yazı-tura): doğrulama {auc_val:.3f} | test {auc_test:.3f}")
     print(f"AI'sız (tüm sinyaller): {base_test}")
-    print(f"AI filtreli (eşik {threshold}): {ai_test}")
+    print(f"AI filtreli (kurulumlar {setups_kept}, eşik {threshold}): {ai_test}")
     for k, v in by_setup.items():
         print(f"   - {k}: {v}")
 
@@ -219,7 +240,7 @@ def main():
     with open(os.path.join(config.AI_MODEL_DIR, f"{engine}_report.json"), "w") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     joblib.dump({"model": model, "features": X_cols, "threshold": threshold,
-                 "approved": bool(approved), "report": report},
+                 "setups": setups_kept, "approved": bool(approved), "report": report},
                 os.path.join(config.AI_MODEL_DIR, f"{engine}.joblib"))
 
     if approved:
