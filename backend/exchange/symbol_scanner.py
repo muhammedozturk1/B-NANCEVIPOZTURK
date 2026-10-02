@@ -25,9 +25,6 @@ def get_active_symbols(client) -> list:
         symbols = client.fetch_top_symbols(
             limit=config.TOP_SYMBOLS_COUNT,
             min_volume=config.MIN_24H_VOLUME_USDT,
-            quote=config.QUOTE_CURRENCY,
-            exclude_base_assets=config.EXCLUDE_BASE_ASSETS,
-            allowed_base_assets=config.CRYPTO_UNIVERSE,
         )
         if symbols:
             _cache["symbols"] = symbols

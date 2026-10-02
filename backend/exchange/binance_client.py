@@ -314,41 +314,15 @@ class BinanceClient:
     # ------------------------------------------------------------------
     # DİNAMİK PİYASA TARAMASI
     # ------------------------------------------------------------------
-    def fetch_top_symbols(self, limit: int, min_volume: float, quote: str = "USDT",
-                           exclude_base_assets: set = None, allowed_base_assets: set = None) -> list:
-        """
-        Binance Futures'taki tüm <quote> paritelerini 24s hacme göre sıralar,
-        minimum hacim ve dışlanan bazları (stablecoin'ler vb.) filtreleyip
-        en aktif <limit> tanesini döner. Sabit bir coin listesi YOKTUR -
-        piyasa hangi coin'lerde hareketliyse bot oraya bakar.
-        """
-        exclude_base_assets = exclude_base_assets or set()
+    def fetch_top_symbols(self, limit: int, min_volume: float, **_ignored) -> list:
+        """Tüm USDT perpetual marketini tarar; kripto olmayan, sığ ve yeni listelenen
+        kontratları eler (backend/exchange/universe.py). Sabit coin listesi YOKTUR."""
+        from backend.exchange import universe
         tickers = self.data_exchange.fetch_tickers()
-
-        candidates = []
-        seen = set()
-        for raw_symbol, ticker in tickers.items():
-            base_symbol = raw_symbol.split(":")[0]  # 'BTC/USDT:USDT' -> 'BTC/USDT'
-            if not base_symbol.endswith(f"/{quote}") or base_symbol in seen:
-                continue
-            if base_symbol not in self.exchange.markets:
-                continue  # emir borsasında (testnet) olmayan pariteyi atla
-
-            base_asset = base_symbol.split("/")[0]
-            if base_asset in exclude_base_assets:
-                continue
-            if allowed_base_assets and base_asset not in allowed_base_assets:
-                continue  # emtia / hisse / meme coin -> atla
-
-            volume = ticker.get("quoteVolume") or 0
-            if volume < min_volume:
-                continue
-
-            seen.add(base_symbol)
-            candidates.append((base_symbol, volume))
-
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        return [symbol for symbol, _ in candidates[:limit]]
+        # Emir borsasında (testnet) olmayan pariteler atlanır
+        tradable = {f"{m['base']}/{m['quote']}" for m in self.exchange.markets.values()
+                    if m.get("swap") and m.get("quote") == config.QUOTE_CURRENCY}
+        return universe.select_symbols(self.data_exchange, tickers, limit, min_volume, allowed=tradable)
 
     # ------------------------------------------------------------------
     # SENKRONİZASYON (bağlantı koptuktan sonra state kurtarma)

@@ -58,9 +58,10 @@ COST_PER_SIDE = TAKER_FEE + SLIPPAGE
 # kazançtan çok daha büyük değil. Eski sistemdeki "kârı 0.3R'de kes, zararı
 # 1R'de al" yapısı kaldırıldı - o yapı matematiksel olarak kaybettiriyordu.
 ENGINE_ENABLED = {
-    "scalp": _env_bool("ENGINE_SCALP", True),
+    # Scalp kapalı: 3 ayrı eğitimde de test döneminde zarar etti (komisyon kazancı yiyor).
+    "scalp": _env_bool("ENGINE_SCALP", False),
     "day": _env_bool("ENGINE_DAY", True),
-    "swing": _env_bool("ENGINE_SWING", False),
+    "swing": _env_bool("ENGINE_SWING", True),
 }
 
 ENGINE_TIMEFRAMES = {
@@ -102,7 +103,8 @@ AI_MODEL_DIR = os.getenv("AI_MODEL_DIR", "models")
 AI_MIN_PROBABILITY = _env_float("AI_MIN_PROBABILITY", 0.0)
 
 # Modelin "onaylı" sayılması için test dönemindeki asgari performans
-AI_APPROVAL = {"min_test_trades": 30, "min_avg_r": 0.05, "min_profit_factor": 1.10}
+# (30 işlem çok azdı - şansla geçilebiliyordu. Daha fazla coin = daha fazla test işlemi.)
+AI_APPROVAL = {"min_test_trades": 60, "min_avg_r": 0.05, "min_profit_factor": 1.15}
 
 # ----------------------------------------------------------------------
 # SERMAYE VE RİSK
@@ -115,12 +117,12 @@ RISK_PERCENT_PER_TRADE = {
     "swing": _env_float("RISK_SWING", 0.01),
 }
 
-MAX_CONCURRENT_POSITIONS = {"scalp": 3, "day": 2, "swing": 1}
+MAX_CONCURRENT_POSITIONS = {"scalp": 3, "day": 3, "swing": 3}
 
 # Tüm açık işlemlerin toplam riski kasanın bu oranını geçemez
-MAX_TOTAL_OPEN_RISK_PERCENT = 0.04
+MAX_TOTAL_OPEN_RISK_PERCENT = 0.05
 # Altcoinlerin hepsi BTC ile birlikte hareket eder: aynı yöndeki toplam risk tavanı
-MAX_SAME_DIRECTION_RISK_PERCENT = 0.03
+MAX_SAME_DIRECTION_RISK_PERCENT = 0.04
 
 MAX_LEVERAGE = 10
 MAX_MARGIN_PERCENT_PER_TRADE = 0.30
@@ -138,17 +140,19 @@ ENGINE_PAUSE_DURATION_MINUTES = 240
 # PİYASA TARAMASI
 # ----------------------------------------------------------------------
 QUOTE_CURRENCY = "USDT"
-TOP_SYMBOLS_COUNT = 15
-MIN_24H_VOLUME_USDT = 100_000_000
+TOP_SYMBOLS_COUNT = 100           # en fazla bu kadar parite (pratikte likit marketin tamamı)
+MIN_24H_VOLUME_USDT = 20_000_000  # bunun altı sığ: stop'lar kayarak vuruluyor
 SYMBOL_CACHE_TTL_SECONDS = 1800
 EXCLUDE_BASE_ASSETS = {"USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP"}
-# Sadece bu likit KRİPTO paralar taranır. Binance Futures'ta artık altın (XAU),
-# gümüş (XAG), petrol (CL), hisse senetleri (SNDK, SOXL...) ve meme coinler de var;
-# bunlar farklı saatlerde işlem görür / farklı davranır ve modeli bozar.
-CRYPTO_UNIVERSE = {
-    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "LINK", "AVAX", "LTC",
-    "SUI", "TRX", "DOT", "BCH", "NEAR", "APT", "ARB", "OP", "TON", "ATOM",
-    "FIL", "UNI", "ETC", "AAVE",
+# TARAMA: Sabit liste YOK - tüm Binance Futures USDT perpetual marketi taranır
+# (backend/exchange/universe.py). Elenenler: kripto olmayan kontratlar (altın, petrol,
+# hisse), sığ coinler ve yeni listelenenler.
+MIN_LISTING_DAYS = 120
+# Ek güvenlik: borsa verisinde işaretlenmemiş olabilecek kripto-dışı kontratlar
+NON_CRYPTO_BLACKLIST = {
+    "XAU", "XAG", "XPT", "XPD", "CL", "BZ", "NG", "COPPER",
+    "SOXL", "SNDK", "SPCX", "TSLA", "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META",
+    "COIN", "MSTR", "HOOD", "QQQ", "SPY",
 }
 FALLBACK_SYMBOLS = ["BTC/USDT", "ETH/USDT"]
 SYMBOL_COOLDOWN_MINUTES = 15

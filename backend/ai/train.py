@@ -45,23 +45,9 @@ def _public_exchange():
 
 
 def top_symbols(ex, count: int) -> list:
-    tickers = ex.fetch_tickers()
-    rows = []
-    for sym, t in tickers.items():
-        base = sym.split(":")[0]
-        asset = base.split("/")[0]
-        if not base.endswith("/USDT") or asset in config.EXCLUDE_BASE_ASSETS:
-            continue
-        if asset not in config.CRYPTO_UNIVERSE:
-            continue  # altın, petrol, hisse, meme coin -> eğitime alma
-        rows.append((base, t.get("quoteVolume") or 0))
-    rows.sort(key=lambda x: -x[1])
-    seen, out = set(), []
-    for s, _ in rows:
-        if s not in seen:
-            seen.add(s)
-            out.append(s)
-    return out[:count]
+    """Canlı botla AYNI tarama kuralları (backend/exchange/universe.py)."""
+    from backend.exchange import universe
+    return universe.select_symbols(ex, ex.fetch_tickers(), count, config.MIN_24H_VOLUME_USDT)
 
 
 def load_ohlcv(ex, symbol: str, tf: str, days: int, offline: bool) -> list:
@@ -150,7 +136,7 @@ def main():
     ap.add_argument("--engine", default="scalp", choices=list(config.ENGINE_TIMEFRAMES))
     ap.add_argument("--days", type=int, default=365)
     ap.add_argument("--symbols", default="", help="virgüllü liste, boşsa en hacimli N parite")
-    ap.add_argument("--top", type=int, default=12)
+    ap.add_argument("--top", type=int, default=config.TOP_SYMBOLS_COUNT)
     ap.add_argument("--offline", action="store_true", help="sadece data/ klasöründeki CSV'leri kullan")
     args = ap.parse_args()
 
@@ -161,6 +147,7 @@ def main():
         (top_symbols(ex, args.top) if ex else config.FALLBACK_SYMBOLS)
 
     print(f"\n=== {engine.upper()} | {tfs['entry']}/{tfs['confirm']} | {args.days} gün | {len(symbols)} parite ===")
+    print("Pariteler: " + ", ".join(s.split("/")[0] for s in symbols))
     parts = []
     for sym in symbols:
         try:
