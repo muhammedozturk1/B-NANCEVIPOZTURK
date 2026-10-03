@@ -21,6 +21,7 @@ from backend.db.database import init_db
 from backend.exchange.binance_client import BinanceClient
 from backend.engines import scalp, day, swing
 from backend.risk import position_monitor
+from backend.funding import engine as funding_engine
 from backend.telegram import notifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -33,6 +34,13 @@ def run_engine_safely(engine_module, client):
         engine_module.run(client)
     except Exception as e:
         logger.error(f"{engine_module.ENGINE_NAME} motorunda beklenmeyen hata: {e}")
+
+
+def run_funding_safely():
+    try:
+        funding_engine.run_cycle()
+    except Exception as e:
+        logger.exception(f"[funding] döngü hatası: {e}")
 
 
 def run_position_monitor_safely(client):
@@ -108,6 +116,13 @@ def main():
         tf = config.ENGINE_TIMEFRAMES[name]["entry"]
         scheduler.add_job(run_engine_safely, "cron", args=[module, client], id=f"{name}_engine",
                           max_instances=1, coalesce=True, **CRON_FOR_TF[tf])
+
+    if config.FUNDING["enabled"]:
+        logger.info(f"[funding] Fonlama motoru AKTİF | mod: {config.FUNDING['mode']} | "
+                    f"en fazla {config.FUNDING['max_positions']} pozisyon | her saatin 5. dakikası")
+        scheduler.add_job(run_funding_safely, "cron", minute=5, second=0, id="funding_engine",
+                          max_instances=1, coalesce=True)
+        scheduler.add_job(run_funding_safely, "date", id="funding_first_run")  # açılışta hemen bir kez
 
     scheduler.add_job(run_position_monitor_safely, "interval",
                       seconds=config.POSITION_MONITOR_INTERVAL_SECONDS,

@@ -11,7 +11,7 @@ istediğinde kullan.
 """
 from backend.exchange.binance_client import BinanceClient
 from backend.db.database import get_session
-from backend.db.models import Trade, EngineState, DailyPnL, BotCapital
+from backend.db.models import Trade, EngineState, DailyPnL, BotCapital, FundingPosition
 
 print("=== BOT SIFIRLAMA BAŞLIYOR ===")
 
@@ -44,6 +44,8 @@ try:
     deleted_states = session.query(EngineState).delete()
     deleted_pnl = session.query(DailyPnL).delete()
     deleted_capital = session.query(BotCapital).delete()
+    deleted_funding = session.query(FundingPosition).delete()
+    print(f"Silindi -> FundingPosition: {deleted_funding}")
     session.commit()
     print(f"Silindi -> Trade: {deleted_trades}, EngineState: {deleted_states}, "
           f"DailyPnL: {deleted_pnl}, BotCapital: {deleted_capital}")

@@ -1,3 +1,33 @@
+# Kripto Bot v3 — Fonlama Oranı (Funding) Stratejisi
+
+## Neden strateji değişti?
+v2'deki kısa vadeli grafik kuralları (EMA geri çekilme, likidite süpürme, Bollinger dönüşü),
+100 coin ve 2-3 yıllık veride, üç farklı zaman diliminde test edildi. Komisyon sonrası
+hiçbiri tutarlı kazanç göstermedi. Bu motorlar artık varsayılan olarak KAPALI.
+
+## Yeni strateji nasıl kazanır?
+Vadeli işlemlerde long ve short tutanlar her 1/4/8 saatte bir birbirine "fonlama" öder.
+Oran pozitifken long'lar short'lara öder. Bot aynı coini **spot'ta alır** ve vadelide
+**aynı miktar short açar**. Fiyat ne yöne giderse gitsin iki bacak birbirini dengeler;
+bot sadece fonlama ödemelerini toplar. Fiyat tahmini yoktur.
+
+- Giriş: son 3 günün ortalama fonlaması yıllık %15+ ve hiç negatif ödeme yok
+- Çıkış: ortalama yıllık %3 altına düşerse, fonlama negatife dönerse veya fiyat %30 oynarsa
+- En az 3 gün tutulur (giriş-çıkış maliyeti ~%0.42'yi çıkarmak için)
+- En fazla 5 pozisyon, her biri kasanın %12'si (vadeli bacak 2x teminatla)
+
+## Mod: paper (sanal)
+Gerçek Binance fiyat ve fonlama verisiyle sanal işlem yapılır, emir gönderilmez.
+Testnetin fonlama oranları gerçek olmadığı için bu strateji için paper modu testnetten
+daha gerçekçidir. Gerçek parayla çalıştırma (live) ayrı bir adım olarak eklenecek.
+
+## Backtest (Codespace'te)
+```bash
+python -u -m backend.funding.backtest --days 1095
+```
+
+---
+
 # Kripto Trading Bot v2 — AI Filtreli, "Küçük ama Net Kazanç" Modu
 
 ## v2'de ne değişti?

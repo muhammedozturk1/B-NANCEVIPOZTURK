@@ -60,8 +60,9 @@ COST_PER_SIDE = TAKER_FEE + SLIPPAGE
 ENGINE_ENABLED = {
     # Scalp kapalı: 3 ayrı eğitimde de test döneminde zarar etti (komisyon kazancı yiyor).
     "scalp": _env_bool("ENGINE_SCALP", False),
-    "day": _env_bool("ENGINE_DAY", True),
-    "swing": _env_bool("ENGINE_SWING", True),
+    # Day/Swing kapalı: 100 coin / 2-3 yıllık testte tutarlı avantaj göstermediler.
+    "day": _env_bool("ENGINE_DAY", False),
+    "swing": _env_bool("ENGINE_SWING", False),
 }
 
 ENGINE_TIMEFRAMES = {
@@ -105,6 +106,34 @@ AI_MIN_PROBABILITY = _env_float("AI_MIN_PROBABILITY", 0.0)
 # Modelin "onaylı" sayılması için test dönemindeki asgari performans
 # (30 işlem çok azdı - şansla geçilebiliyordu. Daha fazla coin = daha fazla test işlemi.)
 AI_APPROVAL = {"min_test_trades": 60, "min_avg_r": 0.05, "min_profit_factor": 1.15}
+
+# ----------------------------------------------------------------------
+# FONLAMA ORANI (FUNDING) STRATEJİSİ - v3 ana strateji
+# ----------------------------------------------------------------------
+# Aynı coin spot'ta ALINIR, vadelide aynı miktar SHORT açılır. Fiyat ne yöne
+# giderse gitsin iki bacak birbirini dengeler; bot sadece vadeli short'un her
+# 4/8 saatte aldığı fonlama ödemesini toplar. Fiyat tahmini YOK.
+#
+# "paper" modu: gerçek Binance (mainnet) fiyat ve fonlama verisiyle SANAL işlem.
+# Testnet'in fonlama oranları gerçek değil; bu strateji için paper modu
+# testnetten DAHA gerçekçidir. Emir gönderilmez, API key gerekmez.
+FUNDING = {
+    "enabled": _env_bool("FUNDING_ENABLED", True),
+    "mode": os.getenv("FUNDING_MODE", "paper"),
+    "max_positions": int(os.getenv("FUNDING_MAX_POSITIONS", "5")),
+    "position_pct": _env_float("FUNDING_POSITION_PCT", 0.12),  # her pozisyonun nominali (kasa oranı)
+    "perp_leverage": 2,              # short bacak teminatı = nominal / 2 -> pozisyon başı sermaye 1.5x nominal
+    "lookback_hours": 72,            # karar için son 3 günün ortalama fonlama oranı
+    "entry_min_apr": _env_float("FUNDING_ENTRY_APR", 0.15),   # yıllık %15 altı -> komisyonu çıkarmaz
+    "entry_last_min_apr": 0.10,      # son ödeme de en az yıllık %10 olmalı
+    "exit_apr": 0.03,                # 3 günlük ortalama yıllık %3'ün altına düşerse çık
+    "min_hold_hours": 72,            # komisyonu çıkarmak için en az 3 gün tut (güçlü negatif hariç)
+    "max_price_move": 0.30,          # fiyat %30 oynarsa çık (short bacak likidasyon koruması)
+    "spot_fee": 0.001,               # Binance spot taker %0.10
+    "perp_fee": 0.0005,              # Binance futures taker %0.05
+    "slippage": 0.0003,              # bacak başı tahmini kayma
+    "max_history_checks": 30,        # döngü başına en fazla bu kadar coinin geçmişine bak
+}
 
 # ----------------------------------------------------------------------
 # SERMAYE VE RİSK

@@ -16,7 +16,7 @@ from sqlalchemy import func
 
 from backend import config
 from backend.db.database import get_session
-from backend.db.models import Trade, TradeStatus, BotCapital
+from backend.db.models import Trade, TradeStatus, BotCapital, FundingPosition
 from backend.exchange.binance_client import BinanceClient
 from backend.risk import kill_switch as kill_switch_module
 from backend.db import repository
@@ -93,12 +93,48 @@ def summary():
 
         closed_pnl = sum(t.pnl_usd or 0 for t in closed_trades)
 
+        # Fonlama stratejisi pozisyonları
+        fpos = session.query(FundingPosition).all()
+        f_open = [p for p in fpos if p.status == "open"]
+        open_pnl += sum(p.unrealized_pnl_usd or 0 for p in f_open)
+        closed_pnl += sum(p.pnl_usd or 0 for p in fpos if p.status == "closed")
+
         return {
             "starting_balance": config.STARTING_BALANCE,
             "current_balance": round(current_balance, 2),
             "open_pnl": round(open_pnl, 2),
             "closed_pnl": round(closed_pnl, 2),
-            "open_positions_count": len(open_trades),
+            "open_positions_count": len(open_trades) + len(f_open),
+        }
+    finally:
+        session.close()
+
+
+def _serialize_funding(p: FundingPosition):
+    return {
+        "id": p.id, "symbol": p.symbol, "mode": p.mode, "status": p.status,
+        "notional_usd": round(p.notional_usd, 2),
+        "entry_apr": round((p.entry_apr or 0) * 100, 1),
+        "funding_usd": round(p.funding_usd or 0, 4),
+        "funding_payments": p.funding_payments or 0,
+        "pnl_usd": round(p.pnl_usd if p.status == "closed" else (p.unrealized_pnl_usd or 0), 4),
+        "close_reason": p.close_reason,
+        "opened_at": p.opened_at.isoformat() if p.opened_at else None,
+        "closed_at": p.closed_at.isoformat() if p.closed_at else None,
+    }
+
+
+@app.get("/api/funding")
+def funding_positions():
+    session = get_session()
+    try:
+        rows = session.query(FundingPosition).order_by(FundingPosition.id.desc()).limit(200).all()
+        return {
+            "positions": [_serialize_funding(p) for p in rows],
+            "total_funding_usd": round(sum(p.funding_usd or 0 for p in rows), 4),
+            "open_count": sum(1 for p in rows if p.status == "open"),
+            "max_positions": config.FUNDING["max_positions"],
+            "mode": config.FUNDING["mode"],
         }
     finally:
         session.close()

@@ -101,3 +101,35 @@ class BotCapital(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     balance = Column(Float, nullable=False)
     updated_at = Column(DateTime, onupdate=func.now(), server_default=func.now())
+
+
+class FundingPosition(Base):
+    """Fonlama stratejisi pozisyonu: spot LONG + vadeli SHORT (eşit miktar)."""
+    __tablename__ = "funding_positions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String, nullable=False)              # BTC/USDT
+    mode = Column(String, nullable=False, default="paper")
+    status = Column(String, nullable=False, default="open")   # open / closed
+
+    amount = Column(Float, nullable=False)               # coin miktarı (iki bacakta aynı)
+    notional_usd = Column(Float, nullable=False)
+    spot_entry = Column(Float, nullable=False)
+    perp_entry = Column(Float, nullable=False)
+    entry_apr = Column(Float, nullable=True)             # girişteki 3 günlük ort. yıllık fonlama
+
+    funding_usd = Column(Float, default=0.0)             # toplanan fonlama
+    funding_payments = Column(Integer, default=0)
+    last_funding_ts = Column(BigInteger, nullable=False)  # işlenen son fonlama zamanı (ms)
+
+    entry_fees_usd = Column(Float, default=0.0)
+    exit_fees_usd = Column(Float, nullable=True)
+    spot_exit = Column(Float, nullable=True)
+    perp_exit = Column(Float, nullable=True)
+    pnl_usd = Column(Float, nullable=True)               # kapanışta net K/Z
+    unrealized_pnl_usd = Column(Float, nullable=True)    # açıkken anlık net K/Z (çıkış komisyonu dahil)
+    close_reason = Column(String, nullable=True)
+
+    opened_at = Column(DateTime, server_default=func.now())
+    closed_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, onupdate=func.now(), server_default=func.now())

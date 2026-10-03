@@ -154,3 +154,37 @@ def send_weekly_summary():
 def send_alert(text: str):
     """Acil durum uyarısı (örn. korumasız pozisyon)."""
     _send_raw(f"🚨 <b>UYARI</b>\n{text}")
+
+
+# ----------------------------------------------------------------------
+# FONLAMA STRATEJİSİ BİLDİRİMLERİ
+# ----------------------------------------------------------------------
+REASON_LABELS = {
+    "fonlama_dustu": "Fonlama oranı düştü",
+    "negatif_fonlama": "Fonlama negatife döndü",
+    "fiyat_koruma": "Fiyat çok oynadı (koruma)",
+}
+
+
+def send_funding_opened(pos, stats: dict):
+    mode = "📝 SANAL" if pos.mode == "paper" else "💵 GERÇEK"
+    text = (
+        f"💰 <b>Fonlama pozisyonu açıldı</b> ({mode})\n"
+        f"Parite: <b>{pos.symbol}</b>\n"
+        f"Spot AL + Vadeli SAT: {pos.notional_usd:.2f}$\n"
+        f"Son 3 gün ort. yıllık fonlama: %{stats['avg_apr'] * 100:.1f}\n"
+        f"Ödeme aralığı: {stats['interval_h']:.0f} saatte bir"
+    )
+    _send_raw(text)
+
+
+def send_funding_closed(pos, days: float, reason: str):
+    emoji = "✅" if (pos.pnl_usd or 0) > 0 else "🔻"
+    text = (
+        f"{emoji} <b>Fonlama pozisyonu kapandı</b>\n"
+        f"Parite: <b>{pos.symbol}</b> ({days:.1f} gün)\n"
+        f"Sebep: {REASON_LABELS.get(reason, reason)}\n"
+        f"Toplanan fonlama: {pos.funding_usd:+.4f}$ ({pos.funding_payments} ödeme)\n"
+        f"Net K/Z (komisyon dahil): <b>{pos.pnl_usd:+.4f}$</b>"
+    )
+    _send_raw(text)

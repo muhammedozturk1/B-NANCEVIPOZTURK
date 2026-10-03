@@ -368,6 +368,34 @@
       <div id="cumChart" style="height:220px;"></div>
     </div>
 
+    <!-- FUNDING -->
+    <div class="panel fade-in">
+      <div class="panel-head">
+        <div class="panel-title">
+          <span class="icon-box">💰</span> Fonlama Pozisyonları (Spot AL + Vadeli SAT)
+        </div>
+        <div style="font-size:12px; color:var(--text-mute);" id="fundingInfo"></div>
+      </div>
+      <div class="table-wrap">
+        <table id="fundingTable">
+          <thead>
+            <tr>
+              <th>Sembol</th>
+              <th>Durum</th>
+              <th>Büyüklük ($)</th>
+              <th>Giriş Fonlaması (yıllık)</th>
+              <th>Toplanan Fonlama ($)</th>
+              <th>Ödeme</th>
+              <th>Net K/Z ($)</th>
+              <th>Açılış</th>
+              <th>Kapanış Sebebi</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- EXIT BREAKDOWN -->
     <div class="panel fade-in">
       <div class="panel-head">
@@ -883,6 +911,31 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeModal();
 });
 
+// -------- FUNDING --------
+const FUNDING_REASONS = {fonlama_dustu: 'Fonlama düştü', negatif_fonlama: 'Negatif fonlama', fiyat_koruma: 'Fiyat koruma'};
+async function loadFunding() {
+  const r = await fetch('/api/funding');
+  const d = await r.json();
+  const sign = v => (v >= 0 ? '+' : '') + v.toFixed(4);
+  const color = v => v >= 0 ? 'var(--green, #22c55e)' : 'var(--red, #ef4444)';
+  document.getElementById('fundingInfo').textContent =
+    `${d.mode === 'paper' ? 'Sanal (gerçek piyasa verisi)' : 'Gerçek'} · Açık: ${d.open_count}/${d.max_positions} · Toplam fonlama: ${sign(d.total_funding_usd)}$`;
+  const rows = d.positions.map(p => `
+    <tr>
+      <td><b>${p.symbol}</b></td>
+      <td>${p.status === 'open' ? '🟢 Açık' : '⚪ Kapalı'}</td>
+      <td>${p.notional_usd.toFixed(2)}</td>
+      <td>%${p.entry_apr}</td>
+      <td style="color:${color(p.funding_usd)}">${sign(p.funding_usd)}</td>
+      <td>${p.funding_payments}</td>
+      <td style="color:${color(p.pnl_usd)}"><b>${sign(p.pnl_usd)}</b></td>
+      <td>${p.opened_at ? new Date(p.opened_at + 'Z').toLocaleString('tr-TR') : '-'}</td>
+      <td>${p.close_reason ? (FUNDING_REASONS[p.close_reason] || p.close_reason) : '-'}</td>
+    </tr>`).join('');
+  document.querySelector('#fundingTable tbody').innerHTML =
+    rows || '<tr><td colspan="9" style="text-align:center; color:var(--text-mute);">Henüz pozisyon yok - bot uygun fonlama oranı bekliyor (saatte bir kontrol).</td></tr>';
+}
+
 // -------- INIT --------
 async function safe(fn, label) {
   try { await fn(); } catch (e) { console.error(`${label} yüklenemedi:`, e); }
@@ -890,6 +943,7 @@ async function safe(fn, label) {
 
 async function init() {
   await safe(loadSummary, 'Özet');
+  await safe(loadFunding, 'Fonlama');
   await safe(loadSymbols, 'Semboller');
   await safe(loadTrades, 'İşlemler');
   try {
@@ -903,6 +957,7 @@ async function init() {
 
   setInterval(() => {
     safe(loadSummary);
+    safe(loadFunding);
     safe(loadTrades).then(() => safe(loadChart));
     safe(loadExitBreakdown);
   }, 30000);
