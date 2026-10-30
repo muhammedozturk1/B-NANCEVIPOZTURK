@@ -123,7 +123,7 @@ def process_exits(market, session):
 def process_entries(market, session) -> dict:
     """Uygun coinlere girer. Dönüş: dashboard için tarama özeti (neden girildi / girilmedi)."""
     c = config.FUNDING
-    diag = {"candidates": 0, "prefiltered": 0, "checked": 0, "opened": [], "top": [], "note": None}
+    diag = {"candidates": 0, "prefiltered": 0, "checked": 0, "opened": [], "top": [], "skipped": [], "note": None}
     open_pos = _open_positions(session)
     if len(open_pos) >= c["max_positions"]:
         diag["note"] = "pozisyon limiti dolu"
@@ -140,6 +140,10 @@ def process_entries(market, session) -> dict:
     pool = [s for s in candidates if fs.to_apr(rates.get(s, 0.0), 8.0) >= c["entry_last_min_apr"] / 4]
     pool.sort(key=lambda s: -rates.get(s, 0.0))
     diag["prefiltered"] = len(pool)
+    # Ön elemede düşenler (güncel oranı çok düşük): en yüksek orandan başlayarak ilk 30'u
+    in_pool = set(pool)
+    dropped = sorted((s for s in candidates if s not in in_pool), key=lambda s: -rates.get(s, 0.0))
+    diag["skipped"] = [{"symbol": s, "current_apr": round(fs.to_apr(rates.get(s, 0.0), 8.0), 4)} for s in dropped[:30]]
 
     now = _now_ms()
     scored, seen = [], []
@@ -159,7 +163,7 @@ def process_entries(market, session) -> dict:
             scored.append((stats["avg_apr"], sym, stats))
     scored.sort(key=lambda x: -x[0])
     seen.sort(key=lambda x: -x["avg_apr"])
-    diag["top"] = seen[:8]
+    diag["top"] = seen
 
     for avg_apr, sym, stats in scored:
         if len(open_pos) >= c["max_positions"]:
