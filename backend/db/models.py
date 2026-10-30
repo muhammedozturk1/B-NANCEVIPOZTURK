@@ -103,6 +103,22 @@ class BotCapital(Base):
     updated_at = Column(DateTime, onupdate=func.now(), server_default=func.now())
 
 
+class BotStatus(Base):
+    """
+    Bileşen bazlı canlılık/teşhis kaydı (worker yazar, dashboard okur).
+    component: "worker" (heartbeat), "funding", "scalp", "exchange" ...
+    info_json: son döngünün özeti (örn. fonlama taramasında en iyi adaylar).
+    """
+    __tablename__ = "bot_status"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    component = Column(String, unique=True, nullable=False)
+    last_ok_at = Column(DateTime, nullable=True)
+    last_error_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+    info_json = Column(Text, nullable=True)
+
+
 class FundingPosition(Base):
     """Fonlama stratejisi pozisyonu: spot LONG + vadeli SHORT (eşit miktar)."""
     __tablename__ = "funding_positions"

@@ -28,7 +28,7 @@ from collections import defaultdict
 import numpy as np
 
 from backend import config
-from backend.backtest import load_ohlcv, pick_symbols, public_exchange
+from backend.ai.train import _public_exchange as public_exchange, load_ohlcv, top_symbols as pick_symbols
 from backend.strategies import indicators as ind
 
 DAY_MS = 86_400_000
@@ -46,6 +46,19 @@ VARIANTS = [
     ("T5  20/10 long+short +rejim",  20, 10, True,  True),
     ("T6  55/20 long+short +rejim",  55, 20, True,  True),
 ]
+
+
+def to_arrays(ohlcv) -> dict:
+    """[[ts,o,h,l,c,v], ...] -> numpy dizileri. (Eski kod olmayan ind.to_arrays'i çağırıyordu.)"""
+    df = ind.to_df(ohlcv)
+    return {"ts": df["ts"].values, "o": df["open"].values, "h": df["high"].values,
+            "l": df["low"].values, "c": df["close"].values}
+
+
+def atr_arr(h: np.ndarray, l: np.ndarray, c: np.ndarray, n: int) -> np.ndarray:
+    import pandas as pd
+    df = pd.DataFrame({"high": h, "low": l, "close": c})
+    return ind.atr(df, n).values
 
 
 def _prior_max(x: np.ndarray, n: int) -> np.ndarray:
@@ -79,7 +92,7 @@ def trend_trades(symbol: str, a: dict, n_in: int, n_out: int, allow_short: bool,
     n = len(c)
     if n < n_in + ATR_LEN + 5:
         return []
-    atr = ind.atr(h, l, c, ATR_LEN)
+    atr = atr_arr(h, l, c, ATR_LEN)
     hi_in, lo_in = _prior_max(h, n_in), _prior_min(l, n_in)
     hi_out, lo_out = _prior_max(h, n_out), _prior_min(l, n_out)
     cost = config.COST_PER_SIDE
@@ -210,7 +223,7 @@ def main():
     data = {}
     for sym in symbols:
         try:
-            a = ind.to_arrays(load_ohlcv(ex, sym, args.tf, args.days + warm_days, args.offline))
+            a = to_arrays(load_ohlcv(ex, sym, args.tf, args.days + warm_days, args.offline))
             if len(a["c"]) >= 120:
                 data[sym] = a
             print(f"  {sym:<14} {len(a['c']):>5} mum")

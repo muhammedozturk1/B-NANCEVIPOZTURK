@@ -87,6 +87,27 @@ def entry_ok(stats: dict) -> bool:
     )
 
 
+def entry_reject_reason(stats: dict):
+    """entry_ok() ile BİREBİR aynı kurallar; geçmiyorsa ilk takılan kuralın açıklaması (teşhis için)."""
+    c = cfg()
+    if stats["n"] <= 0 or stats["n"] < 0.8 * stats.get("expected_n", stats["n"]):
+        return "yetersiz geçmiş"
+    if stats["avg_apr"] < c["entry_min_apr"]:
+        return f"3g ort. %{stats['avg_apr'] * 100:.1f} < %{c['entry_min_apr'] * 100:.0f}"
+    if stats["last_apr"] < c["entry_last_min_apr"]:
+        return f"son ödeme %{stats['last_apr'] * 100:.1f} < %{c['entry_last_min_apr'] * 100:.0f}"
+    if stats["min_rate"] < 0:
+        return "son 3 günde negatif ödeme var"
+    return None
+
+
+def breakeven_days(apr: float) -> float:
+    """Bu yıllık fonlama oranıyla gidiş-dönüş maliyetin kaç günde çıkacağı (apr<=0 -> sonsuz)."""
+    if apr <= 0:
+        return float("inf")
+    return round_trip_cost() / apr * 365.0
+
+
 def exit_reason(stats: dict, price_move: float, held_hours: float):
     """Çıkış gerekiyorsa sebebini, yoksa None döner."""
     c = cfg()

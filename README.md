@@ -1,5 +1,19 @@
 # Kripto Bot v3 — Fonlama Oranı (Funding) Stratejisi
 
+## v3.1 — Düzeltmeler
+- **Bot artık testnet'e takılıp durmuyor.** Eskiden açılışta testnet bakiyesi okunamazsa TÜM bot kapanıyordu;
+  oysa fonlama motoru (paper) API key'e hiç ihtiyaç duymuyor. Testnet bağlantısı artık sadece yönlü motorlar açıksa gerekli.
+- **"Bot Çalışıyor" rozeti gerçek.** Worker 5 dakikada bir veritabanına sinyal yazıyor; 15 dakika sessiz kalırsa rozet kırmızıya döner.
+- **Fonlama taraması görünür.** Dashboard'da son tarama zamanı, kaç coinin incelendiği, en iyi adayların oranı ve
+  neden girilmediği yazıyor. Son hata da gösteriliyor.
+- **Dashboard:** kümülatif grafik artık gerçek tarihli ve fonlama K/Z'sini de içeriyor; tarihler 3 saat kayık
+  görünmüyor (UTC işareti eklendi); ROI komisyon dahil net K/Z'den hesaplanıyor (eskiden PnL eksiyken ROI artı çıkabiliyordu);
+  yeni "R" sütunu (net K/Z / risk); "Erken Kapama" etiketi "Zaman stopu / Elle" oldu.
+- Telegram heartbeat ve haftalık özet fonlama pozisyonlarını da içeriyor.
+- `backend/lab.py` olmayan modülleri import ettiği için hiç çalışmıyordu, düzeltildi.
+- `tests/` klasörü: internet gerektirmeyen testler -> `pip install pytest httpx && python -m pytest tests`
+
+
 ## Neden strateji değişti?
 v2'deki kısa vadeli grafik kuralları (EMA geri çekilme, likidite süpürme, Bollinger dönüşü),
 100 coin ve 2-3 yıllık veride, üç farklı zaman diliminde test edildi. Komisyon sonrası
@@ -13,7 +27,8 @@ bot sadece fonlama ödemelerini toplar. Fiyat tahmini yoktur.
 
 - Giriş: son 3 günün ortalama fonlaması yıllık %15+ ve hiç negatif ödeme yok
 - Çıkış: ortalama yıllık %3 altına düşerse, fonlama negatife dönerse veya fiyat %30 oynarsa
-- En az 3 gün tutulur (giriş-çıkış maliyeti ~%0.42'yi çıkarmak için)
+- En az 3 gün tutulur. DİKKAT: giriş-çıkış maliyeti ~%0.42; yıllık %15 fonlamayla bu ancak ~10 günde çıkar
+  (eski metindeki "3 gün yeter" hesabı yanlıştı). Bot artık her aday için bu süreyi gösteriyor.
 - En fazla 5 pozisyon, her biri kasanın %12'si (vadeli bacak 2x teminatla)
 
 ## Mod: paper (sanal)

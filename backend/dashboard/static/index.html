@@ -71,6 +71,15 @@
     background: var(--green-bg); color: var(--green); border-radius: 20px;
     font-size: 12px; font-weight: 500;
   }
+  .status-pill.dead { background: var(--red-bg); color: var(--red); }
+  .status-pill.dead .dot { background: var(--red); box-shadow: none; animation: none; }
+  .status-pill.unknown { background: var(--yellow-bg); color: var(--yellow); }
+  .status-pill.unknown .dot { background: var(--yellow); box-shadow: none; animation: none; }
+  .scan-box { font-size: 12px; color: var(--text-mute); margin: 0 0 12px; line-height: 1.6; }
+  .scan-box .err { color: var(--red); }
+  .scan-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .scan-chip { border: 1px solid var(--border, #232b3a); border-radius: 6px; padding: 2px 8px; font-size: 11px; }
+  .scan-chip.ok { border-color: var(--green); color: var(--green); }
   .status-pill .dot {
     width: 6px; height: 6px; background: var(--green); border-radius: 50%;
     animation: pulse 2s infinite;
@@ -324,8 +333,8 @@
         <div class="page-title">Dashboard</div>
         <div class="page-sub" id="lastUpdate">Yükleniyor...</div>
       </div>
-      <div class="status-pill">
-        <span class="dot"></span> Bot Çalışıyor
+      <div class="status-pill unknown" id="statusPill" title="">
+        <span class="dot"></span> <span id="statusText">Durum kontrol ediliyor…</span>
       </div>
     </div>
 
@@ -376,6 +385,7 @@
         </div>
         <div style="font-size:12px; color:var(--text-mute);" id="fundingInfo"></div>
       </div>
+      <div class="scan-box" id="fundingScan"></div>
       <div class="table-wrap">
         <table id="fundingTable">
           <thead>
@@ -425,7 +435,8 @@
               <th>Çıkış</th>
               <th>Durum</th>
               <th>PnL ($)</th>
-              <th>ROI (%)</th>
+              <th title="Komisyon dahil net K/Z / kullanılan marj">ROI (%)</th>
+              <th title="Net K/Z / risk edilen tutar">R</th>
               <th>Tarih</th>
               <th></th>
             </tr>
@@ -649,13 +660,17 @@ async function loadCumulative(period = 'daily') {
       grid: { vertLines: { color: '#1a2230' }, horzLines: { color: '#1a2230' } },
       timeScale: { timeVisible: false, borderColor: '#232b3a' },
       rightPriceScale: { borderColor: '#232b3a' },
+      localization: { locale: 'tr-TR' },
     });
     cumSeries = cumChart.addLineSeries({
       color: '#4d9fff', lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
     });
   }
-  const points = data.map((d, i) => ({ time: i + 1, value: d.cumulative }));
+  // Zaman ekseni gerçek tarih (dönemin ilk günü). Eskiden sıra numarası (1,2,3..) veriliyordu,
+  // grafik tüm noktaları tek bir anda sıkıştırıp eksende sadece "1" gösteriyordu.
+  const points = data.map(d => ({ time: d.period, value: d.cumulative }));
   cumSeries.setData(points);
+  cumChart.timeScale().fitContent();
 }
 
 // -------- EXIT BREAKDOWN --------
@@ -670,7 +685,7 @@ async function loadExitBreakdown() {
     { key: 'closed_tp2', label: 'TP2 Vuruldu', color: '#26d07c' },
     { key: 'closed_be', label: 'Breakeven', color: '#e3b341' },
     { key: 'closed_sl', label: 'Stop-Loss', color: '#f85149' },
-    { key: 'closed_manual', label: 'Erken Kapama', color: '#a371f7' },
+    { key: 'closed_manual', label: 'Zaman stopu / Elle', color: '#a371f7' },
   ];
 
   el.innerHTML = engines.map(eng => {
@@ -711,13 +726,10 @@ async function loadTrades() {
 }
 
 function computeRoi(t) {
-  // ROI = PnL / (Pozisyon büyüklüğü * marj oranı) yaklaşımı.
-  // Basit ve doğru: kaldıraçsız ROI = (exit-entry)/entry * 100
-  if (!t.exit_price || !t.entry_price) return null;
-  const direction = t.side === 'buy' ? 1 : -1;
-  const priceMovePct = ((t.exit_price - t.entry_price) / t.entry_price) * 100 * direction;
-  // Kaldıraçlı ROI = priceMovePct * leverage
-  return priceMovePct * (t.leverage || 1);
+  // Sunucu, komisyon DAHİL net K/Z'yi kullanılan marja bölerek hesaplar (roi_pct).
+  // Eski hesap (fiyat değişimi x kaldıraç) komisyonu saymıyordu: PnL eksiyken ROI artı görünüyordu.
+  if (t.roi_pct !== undefined && t.roi_pct !== null) return t.roi_pct;
+  return null;
 }
 
 function renderTrades() {
@@ -730,7 +742,7 @@ function renderTrades() {
   document.getElementById('tradeCount').textContent = `${filtered.length} işlem`;
 
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:32px; color:var(--text-mute);">Kayıt bulunamadı</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:32px; color:var(--text-mute);">Kayıt bulunamadı</td></tr>`;
     return;
   }
 
@@ -750,9 +762,10 @@ function renderTrades() {
         </td>
         <td class="muted">${fmtPrice(t.entry_price)}</td>
         <td class="muted">${t.exit_price ? fmtPrice(t.exit_price) : '—'}</td>
-        <td><span class="status-badge ${t.status}">${t.status.replace('closed_', '').replace('open', 'açık')}</span></td>
+        <td><span class="status-badge ${t.status}">${({closed_manual: 'süre/elle', open: 'açık'})[t.status] || t.status.replace('closed_', '')}</span></td>
         <td class="${pnlClass}" style="font-weight:700;">${fmt$(t.pnl_usd)}</td>
         <td class="${roiClass}" style="font-weight:700;">${fmtPct(roi)}</td>
+        <td class="${colorPnl(t.r_multiple)}">${t.r_multiple === null || t.r_multiple === undefined ? '—' : (t.r_multiple >= 0 ? '+' : '') + t.r_multiple.toFixed(2) + 'R'}</td>
         <td class="muted" style="font-size:12px;">${fmtDate(t.opened_at)}</td>
         <td onclick="event.stopPropagation();">
           ${t.status === 'open' ? `<button class="icon-btn danger" onclick="closeTrade(${t.id})" title="Kapat">✕</button>` : ''}
@@ -775,7 +788,7 @@ function openModal(tradeId) {
     'closed_tp2': 'TP2 Vuruldu',
     'closed_sl': 'Stop-Loss',
     'closed_be': 'Breakeven',
-    'closed_manual': 'Erken Kapatıldı',
+    'closed_manual': 'Zaman stopu / Elle kapatıldı',
   }[t.status] || t.status;
 
   document.getElementById('modalTitle').textContent = `${t.symbol} · #${t.id}`;
@@ -929,11 +942,44 @@ async function loadFunding() {
       <td style="color:${color(p.funding_usd)}">${sign(p.funding_usd)}</td>
       <td>${p.funding_payments}</td>
       <td style="color:${color(p.pnl_usd)}"><b>${sign(p.pnl_usd)}</b></td>
-      <td>${p.opened_at ? new Date(p.opened_at + 'Z').toLocaleString('tr-TR') : '-'}</td>
+      <td>${p.opened_at ? new Date(p.opened_at).toLocaleString('tr-TR') : '-'}</td>
       <td>${p.close_reason ? (FUNDING_REASONS[p.close_reason] || p.close_reason) : '-'}</td>
     </tr>`).join('');
   document.querySelector('#fundingTable tbody').innerHTML =
     rows || '<tr><td colspan="9" style="text-align:center; color:var(--text-mute);">Henüz pozisyon yok - bot uygun fonlama oranı bekliyor (saatte bir kontrol).</td></tr>';
+}
+
+// -------- BOT DURUMU + FONLAMA TARAMA ÖZETİ --------
+const esc = (x) => String(x ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ago = (iso) => {
+  if (!iso) return '—';
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  return m < 1 ? 'az önce' : (m < 60 ? `${m} dk önce` : `${Math.floor(m / 60)} sa ${m % 60} dk önce`);
+};
+async function loadStatus() {
+  const r = await fetch('/api/status');
+  const s = await r.json();
+  const pill = document.getElementById('statusPill');
+  pill.className = 'status-pill ' + (s.state === 'alive' ? '' : s.state);
+  document.getElementById('statusText').textContent = s.message;
+  pill.title = s.last_heartbeat ? 'Son sinyal: ' + new Date(s.last_heartbeat).toLocaleString('tr-TR') : '';
+
+  const f = (s.components || {}).funding;
+  const box = document.getElementById('fundingScan');
+  if (!f) { box.innerHTML = 'Fonlama taraması henüz raporlanmadı.'; return; }
+  const i = f.info || {};
+  let html = `Son tarama: <b>${ago(f.last_ok_at)}</b>`;
+  if (i.candidates !== undefined)
+    html += ` · ${i.candidates} likit parite · ${i.prefiltered} ön elemeyi geçti · ${i.checked} detaylı incelendi`;
+  if (i.note) html += ` · <b>${esc(i.note)}</b>`;
+  if (f.last_error) html += `<div class="err">Son hata (${ago(f.last_error_at)}): ${esc(f.last_error)}</div>`;
+  if (i.top && i.top.length) {
+    html += `<div class="scan-chips">` + i.top.map(c =>
+      `<span class="scan-chip ${c.ok ? 'ok' : ''}" title="${esc(c.reason || 'giriş şartları sağlandı')} · maliyet ~${c.breakeven_days} günde çıkar">` +
+      `${esc(c.symbol.replace('/USDT', ''))} %${(c.avg_apr * 100).toFixed(1)}</span>`).join('') +
+      `</div><div style="margin-top:4px;">Rakamlar: son 3 günün ortalama yıllık fonlaması. Giriş eşiği %${((i.entry_min_apr || 0.15) * 100).toFixed(0)}. Ayrıntı için üzerine gel.</div>`;
+  }
+  box.innerHTML = html;
 }
 
 // -------- INIT --------
@@ -942,6 +988,7 @@ async function safe(fn, label) {
 }
 
 async function init() {
+  await safe(loadStatus, 'Durum');
   await safe(loadSummary, 'Özet');
   await safe(loadFunding, 'Fonlama');
   await safe(loadSymbols, 'Semboller');
@@ -956,6 +1003,7 @@ async function init() {
   await safe(loadExitBreakdown, 'Dağılım');
 
   setInterval(() => {
+    safe(loadStatus);
     safe(loadSummary);
     safe(loadFunding);
     safe(loadTrades).then(() => safe(loadChart));

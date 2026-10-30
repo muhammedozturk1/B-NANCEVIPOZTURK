@@ -15,6 +15,7 @@ from datetime import datetime
 
 from backend import config
 from backend.db import repository
+from backend.db import status as bot_status
 from backend.db.database import get_session
 from backend.db.models import FundingPosition
 from backend.funding import strategy as fs
@@ -119,33 +120,46 @@ def process_exits(market, session):
 # ----------------------------------------------------------------------
 # 3) GİRİŞ
 # ----------------------------------------------------------------------
-def process_entries(market, session):
+def process_entries(market, session) -> dict:
+    """Uygun coinlere girer. Dönüş: dashboard için tarama özeti (neden girildi / girilmedi)."""
     c = config.FUNDING
+    diag = {"candidates": 0, "prefiltered": 0, "checked": 0, "opened": [], "top": [], "note": None}
     open_pos = _open_positions(session)
     if len(open_pos) >= c["max_positions"]:
-        return
+        diag["note"] = "pozisyon limiti dolu"
+        return diag
     balance = repository.get_virtual_balance()
     used = sum(p.notional_usd for p in open_pos) * _capital_per_notional()
     held = {p.symbol for p in open_pos}
 
     rates = market.current_rates()
-    pool = [s for s in market.candidates() if s not in held]
+    candidates = [s for s in market.candidates() if s not in held]
+    diag["candidates"] = len(candidates)
     # Ön eleme: güncel oranı düşük olanlar için geçmişe bakmaya gerek yok.
     # (Aralık bilinmediği için 8 saat varsayımı -> 4h/1h coinlerde APR düşük çıkar; eşik gevşek tutuldu.)
-    pool = [s for s in pool if fs.to_apr(rates.get(s, 0.0), 8.0) >= c["entry_last_min_apr"] / 4]
+    pool = [s for s in candidates if fs.to_apr(rates.get(s, 0.0), 8.0) >= c["entry_last_min_apr"] / 4]
     pool.sort(key=lambda s: -rates.get(s, 0.0))
+    diag["prefiltered"] = len(pool)
 
     now = _now_ms()
-    scored = []
+    scored, seen = [], []
     for sym in pool[: c["max_history_checks"]]:
         try:
             events = [(t, r) for t, r, _ in market.history(sym, now - (c["lookback_hours"] + 24) * fs.HOUR_MS)]
             stats = fs.trailing_stats(events, now)
-            if fs.entry_ok(stats):
-                scored.append((stats["avg_apr"], sym, stats))
         except Exception as e:
             logger.warning(f"[funding] {sym}: geçmiş alınamadı: {e}")
-    scored.sort(reverse=True)
+            continue
+        diag["checked"] += 1
+        reason = fs.entry_reject_reason(stats)
+        seen.append({"symbol": sym, "avg_apr": round(stats["avg_apr"], 4), "last_apr": round(stats["last_apr"], 4),
+                     "interval_h": round(stats["interval_h"], 1), "ok": reason is None, "reason": reason,
+                     "breakeven_days": round(min(fs.breakeven_days(stats["avg_apr"]), 9999), 1)})
+        if fs.entry_ok(stats):
+            scored.append((stats["avg_apr"], sym, stats))
+    scored.sort(key=lambda x: -x[0])
+    seen.sort(key=lambda x: -x["avg_apr"])
+    diag["top"] = seen[:8]
 
     for avg_apr, sym, stats in scored:
         if len(open_pos) >= c["max_positions"]:
@@ -154,6 +168,7 @@ def process_entries(market, session):
         need = notional * _capital_per_notional()
         if used + need > balance * 0.95:
             logger.info("[funding] serbest sermaye yetersiz, yeni pozisyon açılmadı.")
+            diag["note"] = "serbest sermaye yetersiz"
             break
         try:
             spot_px, perp_px = market.prices(sym)
@@ -175,9 +190,17 @@ def process_entries(market, session):
         session.commit()
         open_pos.append(pos)
         used += need
+        diag["opened"].append(sym)
         logger.info(f"[funding] ✅ {sym} açıldı | nominal {notional:.2f}$ | 3 günlük ort. yıllık fonlama "
-                    f"%{avg_apr * 100:.1f} | ödeme aralığı {stats['interval_h']:.0f} saat")
+                    f"%{avg_apr * 100:.1f} | ödeme aralığı {stats['interval_h']:.0f} saat | "
+                    f"maliyet ~{fs.breakeven_days(avg_apr):.1f} günde çıkar")
         notifier.send_funding_opened(pos, stats)
+
+    if not scored and diag["note"] is None:
+        best = diag["top"][0] if diag["top"] else None
+        diag["note"] = ("giriş şartını sağlayan coin yok" +
+                        (f" (en iyi: {best['symbol']} %{best['avg_apr'] * 100:.1f})" if best else ""))
+    return diag
 
 
 # ----------------------------------------------------------------------
@@ -214,9 +237,15 @@ def _run_cycle_locked():
     try:
         accrue(market, session)
         process_exits(market, session)
-        process_entries(market, session)
+        diag = process_entries(market, session)
         snapshot(market, session)
         n = len(_open_positions(session))
-        logger.info(f"[funding] döngü tamam | açık pozisyon: {n}/{config.FUNDING['max_positions']}")
+        diag["open_positions"] = n
+        diag["max_positions"] = config.FUNDING["max_positions"]
+        diag["entry_min_apr"] = config.FUNDING["entry_min_apr"]
+        bot_status.mark_ok("funding", diag)
+        logger.info(f"[funding] döngü tamam | açık pozisyon: {n}/{config.FUNDING['max_positions']} | "
+                    f"{diag['candidates']} aday, {diag['checked']} detaylı incelendi"
+                    + (f" | {diag['note']}" if diag.get("note") else ""))
     finally:
         session.close()

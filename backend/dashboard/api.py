@@ -7,7 +7,7 @@ Binance'in HERKESE AÇIK (public) uç noktalarını kullanır.
 """
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -15,14 +15,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 
 from backend import config
-from backend.db.database import get_session
+from backend.db.database import get_session, init_db
 from backend.db.models import Trade, TradeStatus, BotCapital, FundingPosition
-from backend.exchange.binance_client import BinanceClient
+from backend.db import status as bot_status
 from backend.risk import kill_switch as kill_switch_module
 from backend.db import repository
 from backend.risk.costs import estimate_net_pnl, estimate_fees_usd
 
-app = FastAPI(title="Crypto Bot Dashboard")
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    # Dashboard worker'dan önce açılırsa (veya yeni tablolar henüz yoksa) hata vermesin.
+    init_db()
+    yield
+
+
+app = FastAPI(title="Crypto Bot Dashboard", lifespan=_lifespan)
+
+
+def _iso(dt):
+    """DB'deki zamanlar UTC (saat dilimi bilgisi olmadan). Sonuna 'Z' eklenmezse tarayıcı
+    bunu YEREL saat sanıyor ve Türkiye'de her şey 3 saat kayık görünüyordu."""
+    return dt.isoformat() + "Z" if dt else None
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -59,6 +75,8 @@ def _serialize_trade(t: Trade):
         "side": t.side,
         "leverage": t.leverage,
         "entry_price": t.entry_price,
+        "amount": t.amount,
+        "risk_usd": t.risk_usd,
         "stop_loss": t.stop_loss,
         "take_profit_1": t.take_profit_1,
         "take_profit_2": t.take_profit_2,
@@ -69,9 +87,20 @@ def _serialize_trade(t: Trade):
         "setup": t.setup,
         "ai_probability": t.ai_probability,
         "fees_usd": t.fees_usd,
-        "opened_at": t.opened_at.isoformat() if t.opened_at else None,
-        "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+        "roi_pct": _net_roi(t),
+        "r_multiple": round(t.pnl_usd / t.risk_usd, 2) if (t.pnl_usd is not None and t.risk_usd) else None,
+        "opened_at": _iso(t.opened_at),
+        "closed_at": _iso(t.closed_at),
     }
+
+
+def _net_roi(t: Trade):
+    """Kullanılan marja göre NET getiri (komisyon dahil). Eskiden dashboard ROI'yi sadece fiyat
+    değişimi x kaldıraçtan hesaplıyordu; komisyonu saymadığı için PnL eksiyken ROI artı görünebiliyordu."""
+    if t.pnl_usd is None or not t.amount or not t.entry_price:
+        return None
+    margin = t.amount * t.entry_price / max(t.leverage or 1, 1)
+    return round(t.pnl_usd / margin * 100, 2) if margin > 0 else None
 
 
 @app.get("/api/summary")
@@ -119,8 +148,8 @@ def _serialize_funding(p: FundingPosition):
         "funding_payments": p.funding_payments or 0,
         "pnl_usd": round(p.pnl_usd if p.status == "closed" else (p.unrealized_pnl_usd or 0), 4),
         "close_reason": p.close_reason,
-        "opened_at": p.opened_at.isoformat() if p.opened_at else None,
-        "closed_at": p.closed_at.isoformat() if p.closed_at else None,
+        "opened_at": _iso(p.opened_at),
+        "closed_at": _iso(p.closed_at),
     }
 
 
@@ -172,33 +201,76 @@ def exit_breakdown():
         session.close()
 
 
+def _period_start(dt: datetime, period: str) -> str:
+    """Grafiğin zaman ekseni için dönemin ilk günü (YYYY-MM-DD)."""
+    d = dt.date()
+    if period == "weekly":
+        d = d - timedelta(days=d.weekday())
+    elif period == "monthly":
+        d = d.replace(day=1)
+    return d.isoformat()
+
+
 @app.get("/api/cumulative")
 def cumulative(period: str = "daily"):
-    """Günlük/haftalık/aylık kümülatif PnL - dashboard'un istediği özellik."""
+    """Günlük/haftalık/aylık kümülatif net K/Z - yönlü işlemler + kapanan fonlama pozisyonları.
+    (Eski sürüm sadece yönlü işlemleri sayıyordu ve tarih yerine sıra numarası dönüyordu.)"""
+    if period not in ("daily", "weekly", "monthly"):
+        period = "daily"
     session = get_session()
     try:
-        closed = session.query(Trade).filter(
-            Trade.status != TradeStatus.OPEN, Trade.closed_at.isnot(None)
-        ).order_by(Trade.closed_at.asc()).all()
+        events = [(t.closed_at, t.pnl_usd or 0) for t in session.query(Trade).filter(
+            Trade.status != TradeStatus.OPEN, Trade.closed_at.isnot(None)).all()]
+        events += [(p.closed_at, p.pnl_usd or 0) for p in session.query(FundingPosition).filter(
+            FundingPosition.status == "closed", FundingPosition.closed_at.isnot(None)).all()]
     finally:
         session.close()
 
-    if not closed:
-        return []
-
-    fmt = {"daily": "%Y-%m-%d", "weekly": "%Y-W%W", "monthly": "%Y-%m"}.get(period, "%Y-%m-%d")
-
     buckets = {}
-    for t in closed:
-        key = t.closed_at.strftime(fmt)
-        buckets[key] = buckets.get(key, 0) + (t.pnl_usd or 0)
+    for closed_at, pnl in events:
+        key = _period_start(closed_at, period)
+        buckets[key] = buckets.get(key, 0) + pnl
 
     cumulative_value = 0
     result = []
-    for key in sorted(buckets.keys()):
+    for key in sorted(buckets):
         cumulative_value += buckets[key]
         result.append({"period": key, "pnl": round(buckets[key], 2), "cumulative": round(cumulative_value, 2)})
     return result
+
+
+@app.get("/api/status")
+def status():
+    """Worker gerçekten çalışıyor mu? Son heartbeat + motor bazlı son başarılı döngü ve hata."""
+    now = datetime.utcnow()
+    try:
+        rows = bot_status.read_all()
+    except Exception as e:
+        return {"alive": False, "state": "unknown", "message": f"Durum okunamadı: {e}", "components": {}}
+
+    worker = rows.get(bot_status.WORKER)
+    last = worker["last_ok_at"] if worker else None
+    age_min = (now - last).total_seconds() / 60 if last else None
+    if last is None:
+        state, msg = "unknown", "Worker henüz durum bildirmedi (güncel sürüm deploy edildi mi?)"
+    elif age_min <= 15:
+        state, msg = "alive", "Bot çalışıyor"
+    else:
+        state, msg = "dead", f"Bot {age_min:.0f} dakikadır sessiz - worker loglarını kontrol et"
+
+    components = {}
+    for name, r in rows.items():
+        if name == bot_status.WORKER:
+            continue
+        err_recent = r["last_error_at"] and (not r["last_ok_at"] or r["last_error_at"] > r["last_ok_at"])
+        components[name] = {
+            "last_ok_at": _iso(r["last_ok_at"]),
+            "last_error_at": _iso(r["last_error_at"]),
+            "last_error": r["last_error"] if err_recent else None,
+            "info": r["info"],
+        }
+    return {"alive": state == "alive", "state": state, "message": msg,
+            "last_heartbeat": _iso(last), "components": components}
 
 
 @app.get("/api/candles")
@@ -251,6 +323,7 @@ def close_trade_manually(trade_id: int):
     finally:
         session.close()
 
+    from backend.exchange.binance_client import BinanceClient
     client = BinanceClient()
     try:
         client.cancel_all_algo_orders(trade_data["symbol"])

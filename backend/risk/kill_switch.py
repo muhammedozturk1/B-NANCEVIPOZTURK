@@ -2,7 +2,8 @@
 KILL-SWITCH Modülü.
 
 İki katmanlı güvenlik:
-  1) GENEL: Kasa günlük olarak %30 zarar ederse TÜM bot durur (yeni işlem açılmaz).
+  1) GENEL: Kasa günlük DAILY_MAX_LOSS_PERCENT (varsayılan %5) zarar ederse yönlü motorlar
+     o gün yeni işlem açmaz.
   2) MOTOR BAZLI: Bir motor art arda N kayıp yaparsa SADECE o motor geçici durur,
      diğerleri çalışmaya devam eder.
 """
