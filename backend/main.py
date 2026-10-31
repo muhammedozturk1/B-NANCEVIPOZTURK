@@ -3,6 +3,8 @@ ANA ÇALIŞMA DÖNGÜSÜ
 
   - Fonlama motoru (v3 ana strateji): saatte bir, her saatin 5. dakikası.
     Paper modunda API key GEREKMEZ, sadece Binance'in herkese açık verisini okur.
+  - SMC Scalper (şartname v2.1, backend/smc): ayrı thread'de, kendi asyncio döngüsüyle.
+    WebSocket ile 3m/5m/15m veri, native SL/TP, %5/%15/%10 risk motoru. SMC_ENABLED ile açılıp kapanır.
   - Yönlü motorlar (scalp/day/swing): varsayılan KAPALI. Açıksa kendi mumlarının
     kapanışına hizalı çalışır (5m motor: her 5 dakikanın 10. saniyesinde).
 
@@ -160,8 +162,21 @@ def build_scheduler(client) -> BlockingScheduler:
     return scheduler
 
 
+def start_smc_scalper():
+    """Şartname v2.1 SMC scalper'ı ayrı thread'de başlatır (backend/smc). Hata olursa
+    sadece loglanır; fonlama ve diğer motorlar etkilenmez."""
+    try:
+        from backend.smc import runner as smc_runner
+        return smc_runner.start_in_thread()
+    except Exception as e:
+        logger.error(f"[smc] SMC scalper başlatılamadı: {e}")
+        bot_status.mark_error("smc", e)
+        return None
+
+
 def main():
     client = startup_checks()
+    start_smc_scalper()
     scheduler = build_scheduler(client)
     logger.info(f"Zamanlayıcı başlatıldı | AI modu: {config.AI_MODE} | işlem başı risk: "
                 f"{config.RISK_PERCENT_PER_TRADE} | günlük zarar limiti: %{config.DAILY_MAX_LOSS_PERCENT*100:.0f}")

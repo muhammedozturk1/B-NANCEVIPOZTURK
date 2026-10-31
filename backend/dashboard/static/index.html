@@ -322,6 +322,13 @@
       <button class="nav-item" data-engine="swing">
         <span class="icon">🌊</span> Swing
       </button>
+      <div class="nav-section">SMC Scalper</div>
+      <a class="nav-item" href="/smc/" style="text-decoration:none">
+        <span class="icon">🎯</span> SMC Paneli
+      </a>
+      <form method="post" action="/logout" style="margin:0">
+        <button class="nav-item" type="submit"><span class="icon">🚪</span> Çıkış</button>
+      </form>
     </nav>
   </aside>
 
@@ -464,6 +471,17 @@
   </div>
 </div>
 
+<script>
+// Oturum süresi dolarsa (401) giriş ekranına dön
+(function () {
+  const _fetch = window.fetch;
+  window.fetch = async (...args) => {
+    const r = await _fetch(...args);
+    if (r.status === 401) { location.href = "/login?next=/"; }
+    return r;
+  };
+})();
+</script>
 <script>
 const fmt$ = (n) => (n === null || n === undefined) ? '—' : (n >= 0 ? '+' : '-') + '$' + Math.abs(n).toFixed(2);
 const fmtAbs$ = (n) => (n === null || n === undefined) ? '—' : '$' + Number(n).toFixed(2);
@@ -956,7 +974,6 @@ const ago = (iso) => {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
   return m < 1 ? 'az önce' : (m < 60 ? `${m} dk önce` : `${Math.floor(m / 60)} sa ${m % 60} dk önce`);
 };
-let scanOpen = false;
 async function loadStatus() {
   const r = await fetch('/api/status');
   const s = await r.json();
@@ -974,34 +991,12 @@ async function loadStatus() {
     html += ` · ${i.candidates} likit parite · ${i.prefiltered} ön elemeyi geçti · ${i.checked} detaylı incelendi`;
   if (i.note) html += ` · <b>${esc(i.note)}</b>`;
   if (f.last_error) html += `<div class="err">Son hata (${ago(f.last_error_at)}): ${esc(f.last_error)}</div>`;
-  const pct = v => (v >= 0 ? '' : '-') + '%' + Math.abs(v * 100).toFixed(1);
-  const rows = (i.top || []).map(c => `
-    <tr>
-      <td><b>${esc(c.symbol.replace('/USDT', ''))}</b></td>
-      <td style="color:${c.avg_apr >= 0 ? 'var(--green)' : 'var(--red)'}">${pct(c.avg_apr)}</td>
-      <td>${pct(c.last_apr)}</td>
-      <td>${c.interval_h} saat</td>
-      <td>${c.breakeven_days >= 9999 ? '—' : '~' + Math.round(c.breakeven_days) + ' gün'}</td>
-      <td>${c.ok ? '<span class="green"><b>✅ Uygun</b></span>' : esc(c.reason)}</td>
-    </tr>`).join('');
-  const skipped = (i.skipped || []).map(c =>
-    `<span class="scan-chip" title="Güncel oran (8 saatlik varsayımla yıllık)">${esc(c.symbol.replace('/USDT', ''))} ${pct(c.current_apr)}</span>`).join('');
-  html += `
-    <details style="margin-top:8px;" ${scanOpen ? 'open' : ''} ontoggle="scanOpen = this.open">
-      <summary style="cursor:pointer; color:var(--blue);">Taranan coinleri göster (${(i.top || []).length} detaylı incelendi, ${(i.skipped || []).length ? (i.candidates - i.prefiltered) : 0} ön elemede düştü)</summary>
-      <div class="table-wrap" style="margin-top:8px;">
-        <table>
-          <thead><tr>
-            <th>Coin</th><th title="Son 3 günün ortalama fonlaması, yıllık">3 gün ort. (yıllık)</th>
-            <th>Son ödeme (yıllık)</th><th>Ödeme aralığı</th>
-            <th title="Bu oranla giriş-çıkış maliyetinin geri gelme süresi">Maliyet çıkış süresi</th><th>Neden alınmadı</th>
-          </tr></thead>
-          <tbody>${rows || '<tr><td colspan="6" class="muted">Detaylı incelenen coin yok.</td></tr>'}</tbody>
-        </table>
-      </div>
-      ${skipped ? `<div style="margin-top:10px;">Ön elemede düşenler (güncel fonlaması çok düşük, geçmişine bakılmadı) — en yüksekten:</div><div class="scan-chips">${skipped}</div>` : ''}
-      <div style="margin-top:6px;">Giriş şartı: 3 gün ort. ≥ %${((i.entry_min_apr || 0.15) * 100).toFixed(0)}, son ödeme ≥ %10, 3 günde hiç eksi ödeme yok.</div>
-    </details>`;
+  if (i.top && i.top.length) {
+    html += `<div class="scan-chips">` + i.top.map(c =>
+      `<span class="scan-chip ${c.ok ? 'ok' : ''}" title="${esc(c.reason || 'giriş şartları sağlandı')} · maliyet ~${c.breakeven_days} günde çıkar">` +
+      `${esc(c.symbol.replace('/USDT', ''))} %${(c.avg_apr * 100).toFixed(1)}</span>`).join('') +
+      `</div><div style="margin-top:4px;">Rakamlar: son 3 günün ortalama yıllık fonlaması. Giriş eşiği %${((i.entry_min_apr || 0.15) * 100).toFixed(0)}. Ayrıntı için üzerine gel.</div>`;
+  }
   box.innerHTML = html;
 }
 

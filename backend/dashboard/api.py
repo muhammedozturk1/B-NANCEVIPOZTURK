@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 
 from backend import config
@@ -25,21 +24,49 @@ from backend.risk.costs import estimate_net_pnl, estimate_fees_usd
 from contextlib import asynccontextmanager
 
 
+from backend.smc.api.main import create_smc_app, install_auth
+from backend.smc.config import Settings as SmcSettings
+from backend.smc.database.db import Database as SmcDatabase
+
+_smc_settings = SmcSettings()
+_smc_db = SmcDatabase(_smc_settings.database_url)
+
+
 @asynccontextmanager
 async def _lifespan(_app):
     # Dashboard worker'dan önce açılırsa (veya yeni tablolar henüz yoksa) hata vermesin.
     init_db()
+    _smc_db.create_all()  # SMC tabloları (smc_ önekli)
     yield
 
 
-app = FastAPI(title="Crypto Bot Dashboard", lifespan=_lifespan)
+app = FastAPI(title="Crypto Bot Dashboard", lifespan=_lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+# Tüm panel (funding + SMC) tek oturum açma ekranının arkasında. Şifre: DASHBOARD_PASSWORD_HASH
+install_auth(app, _smc_settings, _smc_db)
+# Şartname v2.1 SMC Scalper paneli: /smc/
+app.mount("/smc", create_smc_app(_smc_settings, _smc_db))
 
 
 def _iso(dt):
     """DB'deki zamanlar UTC (saat dilimi bilgisi olmadan). Sonuna 'Z' eklenmezse tarayıcı
     bunu YEREL saat sanıyor ve Türkiye'de her şey 3 saat kayık görünüyordu."""
     return dt.isoformat() + "Z" if dt else None
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Not: CORS "*" kaldırıldı. Panel aynı origin'den çalışır; artık şifreli olduğu için başka
+# sitelerin bu API'ye istek atabilmesine gerek yok.
+
+
+@app.get("/health")
+def health():
+    """Render health check (şifresiz). Sadece canlılık bilgisi verir, işlem verisi vermez."""
+    from sqlalchemy import text
+    from backend.db.database import engine
+    try:
+        with engine.connect() as c:
+            c.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return {"db": db_ok, "status": "ok" if db_ok else "down"}
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 PUBLIC_BASE_URL = "https://testnet.binancefuture.com" if config.USE_TESTNET else "https://fapi.binance.com"

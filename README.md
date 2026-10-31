@@ -1,3 +1,62 @@
+# Kripto Bot v3.2 — Funding + SMC Scalper
+
+## v3.2 — Yeni: SMC Scalper (şartname v2.1) ve şifreli panel
+
+Mevcut bot aynen çalışmaya devam ediyor (fonlama motoru, scalp/day/swing, AI filtresi).
+Bunlara **dokunulmadı**; şartnamedeki scalping botu `backend/smc/` altına ayrı bir modül olarak eklendi.
+
+**Nasıl çalışır?**
+- SMC, mevcut worker'ın (`python -m backend.main`) içinde **ayrı bir thread**'de, kendi asyncio döngüsüyle çalışır.
+  Ek Render servisi gerekmez. SMC'de hata olursa thread kendini yeniden başlatır, funding motoru etkilenmez.
+- Binance testnet key'i, Telegram ve veritabanı mevcut botla **ortak**. SMC tabloları `smc_` önekli, mevcut tablolarla çakışmaz.
+- Telegram mesajları `[SMC·TESTNET]` etiketiyle gelir.
+- Yalnızca Binance Futures **Testnet/Demo**'ya emir gönderir; mainnet adresi kod tarafından reddedilir.
+
+**Strateji ve risk (şartname):** 15m/5m/3m SMC/ICT (BOS, CHoCH, liquidity sweep, OTE %62–79, FVG, displacement,
+synthetic delta/CVD, OI, funding, Fear & Greed), 15 puanlık skor (min 9). İşlem başına %5 risk (dinamik, komisyon +
+slippage dahil), toplam açık risk %15, günlük zarar %10, max 3 pozisyon, 3 ardışık SL → 30 dk cooldown, ≤10x isolated,
+liquidation buffer, native STOP_MARKET SL + TP1/TP2/TP3 (%50/%25/%25, 1R/2R/3R), TP1 sonrası breakeven,
+partial fill yönetimi, WebSocket + reconnect, rate limiter, restart reconciliation, kill switch, 72 saatlik trial.
+SMC kendi **sanal 100 USDT** kasasıyla çalışır (mevcut botun kasasından ayrı).
+
+**Aynı testnet hesabı (`SMC_ACCOUNT_SCOPE=shared`, varsayılan):** scalp/day/swing motorlarını açarsan ikisi aynı
+hesapta işlem yapar. SMC başka bir botun pozisyonu olan sembolde işlem açmaz; kill switch ve reconciliation yalnızca
+SMC'nin kendi pozisyonlarına ve `sb` önekli emirlerine dokunur.
+
+**72 saatlik trial:** Binance bağlantısı ve API key doğrulandıktan sonra başlar (key yanlışsa süre akmaz).
+Restart süreyi sıfırlamaz. Süre bitince SMC pozisyonlarını kapatır ve durur; funding motoru çalışmaya devam eder.
+Yeniden başlatmak için: `python reset_bot.py --smc`.
+
+### Kurulum (mevcut Render kurulumuna ek)
+1. Panel şifresi için hash üret (bilgisayarında): `pip install -r requirements.txt && python -m scripts.smc.hash_password`
+2. GitHub'a push et. Render Blueprint `render.yaml`'ı günceller; dashboard servisinde şunları gir:
+   `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD_HASH` (1. adımdaki satır). `SESSION_SECRET` otomatik üretilir.
+3. Worker'da `BINANCE_API_KEY` / `BINANCE_API_SECRET` zaten varsa başka bir şey gerekmez (`SMC_ENABLED=true`).
+
+### Panel
+- **Tüm panel artık şifreli** (eskiden adresi bilen herkes açabiliyor ve işlem kapatabiliyordu). `/health` şifresizdir.
+- Funding paneli: `/` · SMC paneli: `/smc/` (soldaki menüde "SMC Paneli"). SMC panelinde hesap/risk özeti,
+  açık pozisyonlar, interaktif grafik (entry/SL/TP, sweep, BOS/CHoCH, OTE, FVG), trade replay ve **KILL SWITCH** var.
+
+### SMC ayarları
+Tüm SMC parametreleri `SMC_` önekiyle değiştirilir (örn. `SMC_MIN_SCORE=10`, `SMC_RISK_PER_TRADE=0.02`).
+Tam liste: `backend/smc/config.py`. SMC'yi kapatmak için `SMC_ENABLED=false`.
+
+### Backtest ve testler
+```bash
+python -m scripts.smc.download_history --symbols BTCUSDT,ETHUSDT,SOLUSDT --days 90 --out data/smc
+python -m scripts.smc.run_backtest --data data/smc --symbols BTCUSDT,ETHUSDT,SOLUSDT --out reports/smc
+pip install pytest && python -m pytest tests                     # mevcut + SMC testleri (internet gerekmez)
+RUN_TESTNET_INTEGRATION=1 python -m pytest tests/smc/integration -s   # gerçek testnet emirleriyle
+```
+Backtest live ile aynı strateji/risk/TP/BE kodunu kullanır; veri training / validation / out-of-sample olarak ayrılır.
+**Testnet'te çalıştırmadan önce gerçek veriyle backtest yap:** v2'de kısa vadeli grafik kurulumları komisyon sonrası
+kazanç göstermemişti (aşağıdaki "Neden strateji değişti?"); SMC kurulumları da benzer bir alanda.
+
+Şartname maddelerinin koddaki karşılıkları: `docs/SMC_ACCEPTANCE.md`.
+
+---
+
 # Kripto Bot v3 — Fonlama Oranı (Funding) Stratejisi
 
 ## v3.1 — Düzeltmeler

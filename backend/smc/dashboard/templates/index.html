@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMC Scalper · Crypto Bot</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{--bg:#0b0e13;--panel:#131820;--panel2:#0f141b;--line:#222a36;--text:#e6eaf0;--muted:#8792a2;
+  --green:#0ecb81;--red:#f6465d;--accent:#f0b90b;--blue:#3d8bfd;--mono:"IBM Plex Mono",ui-monospace,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 "IBM Plex Sans",system-ui,sans-serif}
+header{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px;
+  background:rgba(11,14,19,.92);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+.brand{font-weight:700;letter-spacing:.06em}.env{background:var(--accent);color:#111;font-weight:700;font-size:11px;padding:2px 7px;border-radius:4px}
+.pill{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.pill.ok{color:var(--green);border-color:#0ecb8155}.pill.bad{color:var(--red);border-color:#f6465d66}.pill.warn{color:var(--accent);border-color:#f0b90b66}
+.spacer{flex:1}
+button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:6px 12px}
+button:hover{border-color:#3a4555}button.kill{background:var(--red);border-color:var(--red);color:#fff;font-weight:700}
+button.kill:disabled,button:disabled{opacity:.4;cursor:not-allowed}
+main{padding:16px;display:grid;gap:14px;grid-template-columns:repeat(12,1fr);max-width:1600px;margin:0 auto}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+h2{margin:0 0 10px;font-size:11px;letter-spacing:.12em;color:var(--muted);font-weight:600;text-transform:uppercase}
+.c4{grid-column:span 4}.c6{grid-column:span 6}.c8{grid-column:span 8}.c12{grid-column:span 12}
+@media (max-width:1100px){.c4,.c6,.c8{grid-column:span 12}}
+.kv{display:grid;grid-template-columns:1fr auto;gap:5px 12px}.kv dt{color:var(--muted)}.kv dd{margin:0;font-family:var(--mono);text-align:right}
+.big{font-size:26px;font-family:var(--mono);font-weight:600;margin:2px 0 10px}
+.pos{color:var(--green)}.neg{color:var(--red)}
+.bar{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden;margin:4px 0 10px}.bar>i{display:block;height:100%;background:var(--accent)}
+.tbl{overflow-x:auto}table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-weight:500;font-family:"IBM Plex Sans",system-ui}
+th:first-child,td:first-child{text-align:left}tr:hover td{background:#171d27}
+.tag{font-size:10px;padding:1px 6px;border-radius:3px;font-weight:700}.tag.LONG{background:#0ecb8122;color:var(--green)}.tag.SHORT{background:#f6465d22;color:var(--red)}
+#chart{height:460px}.comps{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.comp{font-family:var(--mono);font-size:11px;padding:3px 7px;border-radius:4px;border:1px solid var(--line)}.comp.p{color:var(--green)}.comp.f{color:var(--muted)}
+.list{max-height:260px;overflow:auto;font-family:var(--mono);font-size:11.5px}.list div{padding:4px 0;border-bottom:1px dashed var(--line)}
+.muted{color:var(--muted)}.ro{background:#f6465d22;color:var(--red);padding:8px 12px;border-radius:6px;margin-bottom:10px;display:none}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">SMC SCALPER</span><span class="env">{{ env }}</span>
+  <span id="state" class="pill">…</span><span id="hb" class="pill">heartbeat</span>
+  <span id="ws" class="pill">ws</span><span id="trial" class="pill">trial</span>
+  <span class="spacer"></span>
+  <a href="/" class="pill" style="text-decoration:none">← Funding paneli</a>
+  <span class="muted">{{ user }}</span>
+  <button id="resume" title="Kill switch / safe mode / reconciliation sonrası tekrar aktif et">Resume</button>
+  <button id="kill" class="kill">KILL SWITCH</button>
+  <form method="post" action="/logout" style="margin:0"><button>Çıkış</button></form>
+</header>
+<main>
+  <div class="c12 ro" id="ro">Trial süresi doldu. Dashboard salt-okunur; bot otomatik olarak yeniden işlem açmaz.</div>
+  <section class="c4"><h2>Account</h2><div class="big" id="equity">–</div><dl class="kv" id="acct"></dl></section>
+  <section class="c4"><h2>Risk</h2><dl class="kv" id="risk"></dl>
+    <div class="muted" style="margin-top:8px">Açık risk / limit</div><div class="bar"><i id="riskbar" style="width:0"></i></div>
+    <div class="muted">Günlük zarar / limit</div><div class="bar"><i id="dlbar" style="width:0;background:var(--red)"></i></div></section>
+  <section class="c4"><h2>Son sinyaller</h2><div class="list" id="signals"></div></section>
+  <section class="c12"><h2>Açık pozisyonlar</h2><div class="tbl"><table id="positions"></table></div></section>
+  <section class="c12"><h2 id="charttitle">Grafik</h2><div id="chart"></div><div class="comps" id="comps"></div></section>
+  <section class="c12"><h2>Kapanan işlemler</h2><div class="tbl"><table id="trades"></table></div></section>
+  <section class="c6"><h2>Sistem olayları</h2><div class="list" id="events"></div></section>
+  <section class="c6"><h2>Risk olayları & komutlar</h2><div class="list" id="riskev"></div></section>
+</main>
+<script>
+const CSRF = {{ csrf|tojson }};
+const BASE = {{ base|tojson }};
+const $ = id => document.getElementById(id);
+const f = (v, d=2) => v==null||isNaN(v) ? "–" : Number(v).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+const px = v => v==null ? "–" : Number(v).toPrecision(6).replace(/\.?0+$/,"");
+const pct = v => v==null ? "–" : (v*100).toFixed(2)+"%";
+const cls = v => v>0?"pos":v<0?"neg":"";
+const esc = s => String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const dur = s => s==null?"–": s<3600? Math.round(s/60)+"dk" : (s/3600).toFixed(1)+"sa";
+const kv = rows => rows.map(([k,v,c])=>`<dt>${k}</dt><dd class="${c||""}">${v}</dd>`).join("");
+
+async function api(path, opts={}) {
+  const r = await fetch(BASE + path, {credentials:"same-origin", ...opts,
+    headers:{"X-CSRF-Token":CSRF, ...(opts.headers||{})}});
+  if (r.status === 401) { location.href = "/login?next=" + encodeURIComponent(BASE + "/"); throw new Error("auth"); }
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+let readOnly = false;
+async function refresh() {
+  let d; try { d = await api("/api/summary"); } catch(e) { return; }
+  readOnly = d.read_only; $("ro").style.display = readOnly ? "block" : "none";
+  $("kill").disabled = readOnly; $("resume").disabled = readOnly;
+  const st = $("state"); st.textContent = d.state + (d.reason ? " · " + d.reason : "");
+  st.className = "pill " + (d.state==="RUNNING" ? "ok" : ["EMERGENCY_STOP","EXPIRED","SAFE_MODE","RECONCILIATION_REQUIRED"].includes(d.state) ? "bad" : "warn");
+  $("hb").textContent = "heartbeat " + (d.heartbeat_age_s==null ? "yok" : Math.round(d.heartbeat_age_s)+"s");
+  $("hb").className = "pill " + (d.worker_alive ? "ok" : "bad");
+  $("ws").textContent = `ws market:${d.ws.market?"✓":"✗"} user:${d.ws.user?"✓":"✗"} rest:${d.rest_ok?"✓":"✗"}`;
+  $("ws").className = "pill " + (d.ws.market && d.ws.user && d.rest_ok ? "ok" : "bad");
+  const a = d.account, r = d.risk;
+  const tr = a.trial_remaining_s; $("trial").textContent = "trial " + (tr==null?"–": tr<=0 ? "BİTTİ" : `${Math.floor(tr/3600)}sa ${Math.floor(tr%3600/60)}dk`);
+  $("trial").className = "pill " + (tr>0 ? (tr<6*3600?"warn":"ok") : "bad");
+  $("equity").innerHTML = `${f(a.equity)} <span class="muted" style="font-size:13px">USDT</span>`;
+  $("acct").innerHTML = kv([["Starting equity", f(a.starting_equity)], ["Available balance", f(a.available_balance)],
+    ["Margin used", f(a.margin_used)], ["Unrealized PnL", f(a.unrealized_pnl,4), cls(a.unrealized_pnl)],
+    ["Realized PnL", f(a.realized_pnl,4), cls(a.realized_pnl)], ["Daily PnL", f(a.daily_pnl,4), cls(a.daily_pnl)],
+    ["Monthly PnL", f(a.monthly_pnl,4), cls(a.monthly_pnl)], ["Equity modu", a.equity_mode],
+    ["Trial bitiş", a.trial_expires_at ? new Date(a.trial_expires_at).toLocaleString() : "–"]]);
+  const dl = Math.max(0, -(a.daily_equity_change||0)) / ((r.day_start_equity||a.equity) * r.daily_loss_limit);
+  $("risk").innerHTML = kv([["Risk / trade", pct(r.risk_per_trade)], ["Max open risk", pct(r.max_open_risk)],
+    ["Daily loss limit", pct(r.daily_loss_limit)], ["Current open risk", `${f(r.current_open_risk,3)} (${pct(r.current_open_risk_pct)})`],
+    ["Margin usage", pct(r.margin_usage_pct)], ["Max leverage", r.max_leverage+"x"],
+    ["Ardışık SL", r.consecutive_losses], ["Cooldown", r.cooldown_until ? new Date(r.cooldown_until).toLocaleTimeString() : "–"]]);
+  $("riskbar").style.width = Math.min(100, r.current_open_risk_pct / r.max_open_risk * 100) + "%";
+  $("dlbar").style.width = Math.min(100, dl*100) + "%";
+
+  $("positions").innerHTML = `<tr><th>Coin</th><th>Yön</th><th>Durum</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th><th>Qty</th><th>Lev</th><th>Risk</th><th>Açık risk</th><th>Skor</th><th></th></tr>` +
+    (d.positions.length ? d.positions.map(p => `<tr><td>${esc(p.symbol)}</td><td><span class="tag ${p.side}">${p.side}</span></td><td>${esc(p.state)}</td>
+      <td>${px(p.entry)}</td><td>${px(p.sl)}${p.be_active?" (BE)":""}</td><td>${px(p.tp1)}</td><td>${px(p.tp2)}</td><td>${px(p.tp3)}</td>
+      <td>${p.remaining}/${p.qty}</td><td>${p.leverage}x</td><td>${f(p.risk_amount,3)}</td><td>${f(p.open_risk,3)}</td><td>${p.score??"–"}/15</td>
+      <td><button onclick="showChart(${p.id})">Grafik</button></td></tr>`).join("") : `<tr><td colspan="14" class="muted">Açık pozisyon yok</td></tr>`);
+
+  $("trades").innerHTML = `<tr><th>Coin</th><th>Yön</th><th>Entry</th><th>Exit</th><th>Net PnL</th><th>R</th><th>Komisyon</th><th>Funding</th><th>Süre</th><th>Çıkış</th><th>TP</th><th>Skor</th><th></th></tr>` +
+    (d.trades.length ? d.trades.map(t => `<tr><td>${esc(t.symbol)}</td><td><span class="tag ${t.side}">${t.side}</span></td><td>${px(t.entry)}</td><td>${px(t.exit)}</td>
+      <td class="${cls(t.net_pnl)}">${f(t.net_pnl,4)}</td><td class="${cls(t.r)}">${f(t.r,2)}</td><td>${f(t.commission,4)}</td><td>${f(t.funding,4)}</td>
+      <td>${dur(t.duration_s)}</td><td>${esc(t.exit_reason)}</td><td>${(t.tp_hits||[]).join(",")||"–"}</td><td>${t.score??"–"}</td>
+      <td><button onclick="showChart(${t.position_id})">Replay</button></td></tr>`).join("") : `<tr><td colspan="13" class="muted">Henüz kapanan işlem yok</td></tr>`);
+
+  $("signals").innerHTML = d.signals.map(s => `<div><span class="tag ${s.side}">${s.side}</span> ${esc(s.symbol)} ${s.score}/15 ${s.accepted?'<span class="pos">✓ kabul</span>':'<span class="muted">'+esc(s.reason||"")+'</span>'}</div>`).join("") || '<div class="muted">–</div>';
+  $("events").innerHTML = d.events.map(e => `<div><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> <b class="${e.level==="ERROR"?"neg":""}">${esc(e.kind)}</b> ${esc(e.message)}</div>`).join("");
+  $("riskev").innerHTML = d.commands.map(c => `<div><b>${esc(c.command)}</b> ${esc(c.status)} <span class="muted">${esc(c.result||"")}</span></div>`).join("") +
+    d.risk_events.map(e => `<div><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> ${esc(e.kind)} ${esc(e.symbol||"")} <span class="muted">${esc(JSON.stringify(e.details)).slice(0,140)}</span></div>`).join("");
+}
+
+let chart, series;
+async function showChart(id) {
+  const d = await api(`/api/position/${id}/chart`);
+  const p = d.position, sn = d.snapshot || {};
+  $("charttitle").textContent = `Grafik · ${p.symbol} ${p.side} #${p.id} · ${p.state}${d.error ? " · veri hatası" : ""}`;
+  if (chart) chart.remove();
+  chart = LightweightCharts.createChart($("chart"), {layout:{background:{color:"#131820"},textColor:"#8792a2"},
+    grid:{vertLines:{color:"#1b222d"},horzLines:{color:"#1b222d"}}, timeScale:{timeVisible:true,secondsVisible:false},
+    rightPriceScale:{borderColor:"#222a36"}, crosshair:{mode:0}});
+  series = chart.addCandlestickSeries({upColor:"#0ecb81",downColor:"#f6465d",borderVisible:false,wickUpColor:"#0ecb81",wickDownColor:"#f6465d"});
+  series.setData(d.klines);
+  const line = (price, color, title, style=0) => price!=null && series.createPriceLine({price, color, lineWidth:1, lineStyle:style, axisLabelVisible:true, title});
+  line(p.entry || p.planned_entry, "#e6eaf0", "Entry"); line(p.initial_sl, "#f6465d", "SL");
+  if (p.sl !== p.initial_sl) line(p.sl, "#f0b90b", "SL (güncel)", 2);
+  line(p.tp1, "#0ecb81", "TP1", 2); line(p.tp2, "#0ecb81", "TP2", 2); line(p.tp3, "#0ecb81", "TP3", 2);
+  if (sn.ote) { line(sn.ote.high, "#3d8bfd", "OTE 62%", 1); line(sn.ote.low, "#3d8bfd", "OTE 79%", 1); line(sn.ote.preferred, "#3d8bfd88", "70.5%", 3); }
+  if (sn.fvg) { line(sn.fvg.high, "#a371f7", "FVG", 3); line(sn.fvg.low, "#a371f7", "FVG", 3); }
+  if (sn.liquidity_sweep) line(sn.liquidity_sweep.level, "#f0b90b88", "Liquidity", 1);
+  const snapT = t => { if (!d.klines.length) return null; const s = Math.floor(t/1000); let best = d.klines[0].time;
+    for (const k of d.klines) if (k.time <= s) best = k.time; return best; };
+  const m = [];
+  if (sn.liquidity_sweep) m.push({time:snapT(sn.liquidity_sweep.time), position: p.side==="LONG"?"belowBar":"aboveBar", color:"#f0b90b", shape:"circle", text:"Sweep"});
+  if (sn.ltf_event) m.push({time:snapT(sn.ltf_event.time), position: p.side==="LONG"?"aboveBar":"belowBar", color:"#3d8bfd", shape:"square", text:sn.ltf_event.kind});
+  if (p.opened_at) m.push({time:snapT(Date.parse(p.opened_at)), position: p.side==="LONG"?"belowBar":"aboveBar", color:"#e6eaf0", shape: p.side==="LONG"?"arrowUp":"arrowDown", text:"Entry"});
+  if (p.closed_at) m.push({time:snapT(Date.parse(p.closed_at)), position:"aboveBar", color:"#f0b90b", shape:"arrowDown", text:"Exit " + (p.exit_reason||"")});
+  series.setMarkers(m.filter(x => x.time != null).sort((a,b)=>a.time-b.time));
+  chart.timeScale().fitContent();
+  $("comps").innerHTML = (d.components||[]).map(c => `<span class="comp ${c.passed?"p":"f"}">${c.mandatory?"★ ":""}${esc(c.name)} ${c.points}/${c.max}</span>`).join("");
+  $("chart").scrollIntoView({behavior:"smooth", block:"center"});
+}
+
+$("kill").onclick = async () => {
+  if (!confirm("KILL SWITCH: tüm emirler iptal edilecek ve pozisyonlar market ile kapatılacak. Emin misiniz?")) return;
+  if (prompt('Onay için "KILL" yazın') !== "KILL") return;
+  try { await api("/api/kill", {method:"POST"}); alert("Kill switch komutu worker'a iletildi."); } catch(e) { alert("Hata: " + e.message); }
+  refresh();
+};
+$("resume").onclick = async () => {
+  if (!confirm("Bot tekrar aktif edilsin mi? (Reconciliation yeniden çalıştırılır)")) return;
+  try { await api("/api/resume", {method:"POST"}); } catch(e) { alert("Hata: " + e.message); }
+  refresh();
+};
+window.addEventListener("resize", () => chart && chart.applyOptions({width:$("chart").clientWidth}));
+refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>
