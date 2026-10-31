@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from backend import config
 from backend.db.database import get_session
 from backend.db.models import FundingPosition, Trade, TradeStatus
+from tests.conftest import login
 
 
 def test_startup_without_exchange_when_directional_engines_off(monkeypatch):
@@ -49,6 +50,7 @@ def test_api_trades_roi_dates_and_cumulative():
     from backend.dashboard.api import app
     _seed()
     with TestClient(app) as c:
+        login(c)
         tr = c.get("/api/trades").json()[0]
         assert tr["opened_at"].endswith("Z")              # UTC işaretli -> tarayıcı kaydırmaz
         assert tr["roi_pct"] < 0                          # PnL eksi ise ROI de eksi (eski: +0.20%)
@@ -67,6 +69,7 @@ def test_api_status_states():
     from backend.db import status as bot_status
     from backend.db.models import BotStatus
     with TestClient(app) as c:
+        login(c)
         assert c.get("/api/status").json()["state"] == "unknown"
         bot_status.beat()
         assert c.get("/api/status").json()["state"] == "alive"
@@ -82,5 +85,26 @@ def test_api_status_states():
 def test_dashboard_page_served():
     from backend.dashboard.api import app
     with TestClient(app) as c:
+        login(c)
         html = c.get("/").text
         assert "statusPill" in html and "fundingScan" in html
+
+
+def test_dashboard_requires_login_and_health_is_public():
+    from backend.dashboard.api import app
+    with TestClient(app) as c:
+        assert c.get("/health").json()["db"] is True
+        assert c.get("/api/trades").status_code == 401
+        assert c.get("/smc/api/summary").status_code == 401
+        r = c.get("/", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].startswith("/login")
+        assert c.post("/api/trades/1/close").status_code == 401
+        bad = c.post("/login", data={"username": "admin", "password": "yanlis"})
+        assert bad.status_code == 401
+        login(c)
+        # başka bir siteden gelen state değiştiren istek reddedilir
+        assert c.post("/api/trades/1/close", headers={"Origin": "https://evil.example"}).status_code == 403
+        smc = c.get("/smc/")
+        assert smc.status_code == 200 and "KILL SWITCH" in smc.text
+        assert c.get("/smc/api/summary").json()["risk"]["risk_per_trade"] == 0.05
+        assert "/smc/" in c.get("/").text  # funding panelinde SMC linki
