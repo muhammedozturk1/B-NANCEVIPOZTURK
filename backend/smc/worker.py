@@ -31,7 +31,8 @@ from backend.smc.market_data.rest import BinanceAPIError, BinanceREST
 from backend.smc.market_data.sentiment import FearGreedProvider
 from backend.smc.market_data.universe import (SymbolFilters, apply_brackets, book_metrics, build_universe,
                                       eligible_perpetuals)
-from backend.smc.market_data.ws import ReconnectingWebSocket, WSState, market_stream_url
+from backend.smc.market_data.ws import (ReconnectingWebSocket, WSState, market_stream_url, pick_variant,
+                                       user_stream_url)
 from backend.smc.notifications.telegram import TelegramNotifier
 from backend.smc.risk.correlation import correlation
 from backend.smc.risk.engine import (Candidate, OpenPositionView, PortfolioState, TradingGate, cooldown_active,
@@ -77,7 +78,9 @@ class TradingWorker:
         self.ws_market = ReconnectingWebSocket("market", self._market_url, self._on_market,
                                                on_state=self._on_ws_state, on_connected=self._on_market_connected)
         self.ws_user = ReconnectingWebSocket("user", self._user_url, self._on_user, on_state=self._on_ws_state,
-                                             on_connected=self._on_user_connected)
+                                             on_connected=self._on_user_connected, recv_timeout=None)
+        self._url_variant = {"market": 0, "user": 0}  # son başarılı URL biçimi
+        self._url_in_use = {"market": 0, "user": 0}
         self._scan_queue: asyncio.Queue[int] = asyncio.Queue()
         self._last_scanned = 0
         self._manage_now = asyncio.Event()
@@ -144,6 +147,10 @@ class TradingWorker:
             self.repo.audit("worker", "bot_status", old=self.status.value, new=status.value)
         self.status = status
         reason = ", ".join(sorted(self.holds | self.safe_reasons)) or None
+        if status in (BotStatus.RUNNING, BotStatus.COOLDOWN) and self.s.require_ws_connected:
+            missing = [n for n, w in (("market", self.ws_market), ("user", self.ws_user)) if not w.ready]
+            if missing:
+                reason = f"yeni işlem bekliyor: websocket ({'/'.join(missing)}) bağlı değil"
         if st.state != status.value or st.reason != reason:
             self.repo.update_state(state=status.value, reason=reason)
         return status
@@ -304,11 +311,15 @@ class TradingWorker:
 
     # ============================================================ websocket
     async def _market_url(self) -> str:
-        return market_stream_url(self.s.binance_ws_market_url, self.universe, TFS)
+        v = pick_variant(self._url_variant["market"], self.ws_market.consecutive_failures, 2)
+        self._url_in_use["market"] = v
+        return market_stream_url(self.s.binance_ws_market_url, self.universe, TFS, variant=v)
 
     async def _user_url(self) -> str:
         key = await self.rest.create_listen_key()
-        return f"{self.s.binance_ws_user_url.rstrip('/')}/ws/{key}"
+        v = pick_variant(self._url_variant["user"], self.ws_user.consecutive_failures, 3)
+        self._url_in_use["user"] = v
+        return user_stream_url(self.s.binance_ws_user_url, key, variant=v)
 
     async def _on_market_connected(self) -> None:
         await self.backfill(self.universe)
@@ -319,14 +330,24 @@ class TradingWorker:
             self._handle_reconcile(report, "ws_reconnect")
 
     async def _on_ws_state(self, name: str, state: WSState) -> None:
+        ws = self.ws_market if name == "market" else self.ws_user
         if state == WSState.CONNECTED:
-            if self._ws_was_connected.get(name) is False:
+            if self._url_variant.get(name) != self._url_in_use.get(name):
+                self.repo.system("INFO", "ws_url_selected", f"{name}: biçim {self._url_in_use[name]}")
+            self._url_variant[name] = self._url_in_use.get(name, 0)
+            if self._ws_was_connected.get(name) is False and not self._throttled(f"ws_up:{name}", 1800):
                 self.notifier.notify("WS_RECONNECT", f"WebSocket ({name}) yeniden bağlandı")
             self._ws_was_connected[name] = True
         elif state == WSState.DISCONNECTED and self._ws_was_connected.get(name):
             self._ws_was_connected[name] = False
-            self.notifier.notify("WS_DISCONNECT", f"WebSocket ({name}) bağlantısı koptu; yeni işlem durduruldu")
-            self.repo.system("WARNING", "ws_disconnect", name)
+            self.repo.system("WARNING", "ws_disconnect", name, error=ws.last_error)
+            if not self._throttled(f"ws_down:{name}", 1800):  # kısa kopmalarda Telegram'ı boğma
+                self.notifier.notify("WS_DISCONNECT", f"WebSocket ({name}) bağlantısı koptu; yeniden bağlanıyor")
+        elif state == WSState.DISCONNECTED and ws.consecutive_failures in (3, 20):
+            self.repo.system("ERROR", "ws_connect_failed", f"{name} bağlanamıyor", error=ws.last_error,
+                             failures=ws.consecutive_failures)
+            if not self._throttled(f"ws_fail:{name}", 3600):
+                self.notifier.notify("WS_DISCONNECT", f"WebSocket ({name}) bağlanamıyor: {ws.last_error}")
 
     async def _on_market(self, msg: dict) -> None:
         data = msg.get("data", msg)

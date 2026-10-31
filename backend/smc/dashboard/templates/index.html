@@ -33,7 +33,7 @@ th:first-child,td:first-child{text-align:left}tr:hover td{background:#171d27}
 .tag{font-size:10px;padding:1px 6px;border-radius:3px;font-weight:700}.tag.LONG{background:#0ecb8122;color:var(--green)}.tag.SHORT{background:#f6465d22;color:var(--red)}
 #chart{height:460px}.comps{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .comp{font-family:var(--mono);font-size:11px;padding:3px 7px;border-radius:4px;border:1px solid var(--line)}.comp.p{color:var(--green)}.comp.f{color:var(--muted)}
-.list{max-height:260px;overflow:auto;font-family:var(--mono);font-size:11.5px}.list div{padding:4px 0;border-bottom:1px dashed var(--line)}
+.list{max-height:260px;overflow:auto;background:var(--panel);color-scheme:dark;font-family:var(--mono);font-size:11.5px}.list div{padding:4px 0;border-bottom:1px dashed var(--line)}
 .muted{color:var(--muted)}.ro{background:#f6465d22;color:var(--red);padding:8px 12px;border-radius:6px;margin-bottom:10px;display:none}
 </style>
 </head>
@@ -82,13 +82,54 @@ async function api(path, opts={}) {
   return r.json();
 }
 
+
+// Ret sebeplerini sade Türkçeye çevirir (orijinal kod üzerine gelince görünür)
+const COMP_TR = {htf_structure:"15dk trend uyumsuz", ltf_structure:"5dk kırılım yok", liquidity_sweep:"likidite süpürmesi yok",
+  ote:"fiyat giriş bölgesine (OTE) gelmedi", trigger_3m:"3dk onay mumu yok"};
+const REASON_TR = {
+  no_sweep: () => "likidite süpürmesi yok",
+  insufficient_data: () => "yeterli mum verisi yok",
+  invalid_stop: () => "uygun stop noktası yok",
+  stop_too_wide: v => `stop çok uzak (%${parseFloat(v).toFixed(1)}, en fazla %3)`,
+  stop_too_tight: v => `stop çok yakın (%${parseFloat(v).toFixed(2)})`,
+  score_below_min: v => `puan yetersiz (${v})`,
+  mandatory_failed: v => "zorunlu kontrol eksik: " + v.split(",").map(x => COMP_TR[x] || x).join(", "),
+  rr_below_min: v => `kazanç/risk oranı düşük (${v}, en az 1.2)`,
+  gate: v => ({websocket_not_ready:"websocket bağlı değil", SAFE_MODE:"güvenli mod", COOLDOWN:"bekleme süresi",
+               EMERGENCY_STOP:"kill switch aktif", EXPIRED:"trial bitti", INITIALIZING:"bot açılıyor",
+               RECONCILIATION_REQUIRED:"kontrol gerekiyor", trial_expired:"trial bitti", clock_not_synced:"saat senkron değil"})[v] || v,
+  "risk:spread": v => "fark (spread) çok yüksek",
+  "risk:liquidity": v => "piyasa derinliği yetersiz",
+  "risk:max_open_positions": () => "zaten 3 açık pozisyon var",
+  "risk:position_exists_on_symbol": () => "bu coinde zaten pozisyon var",
+  "risk:daily_loss_limit": () => "günlük zarar limiti doldu",
+  "risk:cooldown_active": () => "3 zarardan sonra bekleme süresi",
+  "risk:too_many_correlated_same_direction": () => "aynı yönde çok fazla benzer coin",
+  "risk:total_open_risk": () => "toplam açık risk %15'i aşar",
+  "risk:sizing": v => "pozisyon boyutu uygun değil (" + ({liquidation_buffer_insufficient:"likidasyona çok yakın",
+       qty_below_min:"miktar çok küçük", notional_below_min:"tutar çok küçük"}[v] || v) + ")",
+  "risk:rr_below_min": v => `kazanç/risk oranı düşük (${v}, en az 1.2)`,
+  foreign_position_on_symbol: () => "bu coinde diğer botun pozisyonu var",
+};
+function trReason(r) {
+  if (!r) return "";
+  return r.split(";").map(part => {
+    const segs = part.split(":");
+    for (let n = Math.min(2, segs.length - 1); n >= 0; n--) {
+      const key = segs.slice(0, n + 1).join(":");
+      if (REASON_TR[key]) return REASON_TR[key](segs.slice(n + 1).join(":"));
+    }
+    return part;
+  }).join(" · ");
+}
+
 let readOnly = false;
 async function refresh() {
   let d; try { d = await api("/api/summary"); } catch(e) { return; }
   readOnly = d.read_only; $("ro").style.display = readOnly ? "block" : "none";
   $("kill").disabled = readOnly; $("resume").disabled = readOnly;
   const st = $("state"); st.textContent = d.state + (d.reason ? " · " + d.reason : "");
-  st.className = "pill " + (d.state==="RUNNING" ? "ok" : ["EMERGENCY_STOP","EXPIRED","SAFE_MODE","RECONCILIATION_REQUIRED"].includes(d.state) ? "bad" : "warn");
+  st.className = "pill " + (d.state==="RUNNING" && !d.reason ? "ok" : d.state==="RUNNING" ? "warn" : ["EMERGENCY_STOP","EXPIRED","SAFE_MODE","RECONCILIATION_REQUIRED"].includes(d.state) ? "bad" : "warn");
   $("hb").textContent = "heartbeat " + (d.heartbeat_age_s==null ? "yok" : Math.round(d.heartbeat_age_s)+"s");
   $("hb").className = "pill " + (d.worker_alive ? "ok" : "bad");
   $("ws").textContent = `ws market:${d.ws.market?"✓":"✗"} user:${d.ws.user?"✓":"✗"} rest:${d.rest_ok?"✓":"✗"}`;
@@ -122,7 +163,7 @@ async function refresh() {
       <td>${dur(t.duration_s)}</td><td>${esc(t.exit_reason)}</td><td>${(t.tp_hits||[]).join(",")||"–"}</td><td>${t.score??"–"}</td>
       <td><button onclick="showChart(${t.position_id})">Replay</button></td></tr>`).join("") : `<tr><td colspan="13" class="muted">Henüz kapanan işlem yok</td></tr>`);
 
-  $("signals").innerHTML = d.signals.map(s => `<div><span class="tag ${s.side}">${s.side}</span> ${esc(s.symbol)} ${s.score}/15 ${s.accepted?'<span class="pos">✓ kabul</span>':'<span class="muted">'+esc(s.reason||"")+'</span>'}</div>`).join("") || '<div class="muted">–</div>';
+  $("signals").innerHTML = d.signals.map(s => `<div title="${esc(s.reason||"")}"><span class="tag ${s.side}">${s.side}</span> <b>${esc(s.symbol)}</b> ${s.score}/15 ${s.accepted?'<span class="pos">✓ işlem açıldı</span>':'<br><span class="muted">'+esc(trReason(s.reason))+'</span>'}</div>`).join("") || '<div class="muted">Henüz sinyal yok</div>';
   $("events").innerHTML = d.events.map(e => `<div><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> <b class="${e.level==="ERROR"?"neg":""}">${esc(e.kind)}</b> ${esc(e.message)}</div>`).join("");
   $("riskev").innerHTML = d.commands.map(c => `<div><b>${esc(c.command)}</b> ${esc(c.status)} <span class="muted">${esc(c.result||"")}</span></div>`).join("") +
     d.risk_events.map(e => `<div><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> ${esc(e.kind)} ${esc(e.symbol||"")} <span class="muted">${esc(JSON.stringify(e.details)).slice(0,140)}</span></div>`).join("");

@@ -34,7 +34,10 @@ StateHandler = Callable[[str, WSState], Awaitable[None]]
 class ReconnectingWebSocket:
     def __init__(self, name: str, url_factory: Callable[[], Awaitable[str]], on_message: MessageHandler, *,
                  on_state: StateHandler | None = None, on_connected: Callable[[], Awaitable[None]] | None = None,
-                 max_backoff: float = 60.0, recv_timeout: float = 90.0):
+                 max_backoff: float = 60.0, recv_timeout: float | None = 90.0, stable_after: float = 10.0):
+        """recv_timeout: bu kadar saniye mesaj gelmezse bağlantı ölü sayılır. Sürekli veri akan
+        market stream için uygundur; hesap hareketsizken sessiz kalan user stream için None verilir
+        (ölü bağlantı tespiti WebSocket ping/pong ile yapılır)."""
         self.name = name
         self.url_factory = url_factory
         self.on_message = on_message
@@ -47,6 +50,11 @@ class ReconnectingWebSocket:
         self._restart = asyncio.Event()
         self._ws = None
         self.reconnects = 0
+        # Kalıcı olamayan ardışık denemeler (URL fallback için). Sunucu bağlantıyı kabul edip hemen
+        # kapatabilir; bu yüzden bağlantı ancak `stable_after` sn ayakta kalırsa veya mesaj gelirse başarılı sayılır.
+        self.consecutive_failures = 0
+        self.stable_after = stable_after
+        self.last_error: str | None = None
 
     @property
     def ready(self) -> bool:
@@ -75,21 +83,46 @@ class ReconnectingWebSocket:
 
     async def run(self) -> None:
         attempt = 0
+        loop = asyncio.get_running_loop()
         while not self._stop.is_set():
+            stable = False
             try:
                 await self._set(WSState.RECONNECTING)
                 url = await self.url_factory()
-                async with websockets.connect(url, ping_interval=None, max_size=2 ** 23, open_timeout=15) as ws:
+                async with websockets.connect(url, ping_interval=60, ping_timeout=30, max_size=2 ** 23,
+                                              open_timeout=15) as ws:
                     self._ws = ws
                     self._restart.clear()
                     await self._set(WSState.RESUBSCRIBING)  # combined stream URL ile abonelik yapılır
                     await self._set(WSState.RECONCILING)
                     if self.on_connected:
-                        await self.on_connected()
+                        try:
+                            await self.on_connected()
+                        except Exception as exc:  # reconciliation/backfill hatası bağlantıyı düşürmez
+                            log.exception("ws[%s] on_connected hatası (bağlantı korunuyor)", self.name)
+                            self.last_error = f"on_connected: {exc!r}"
                     await self._set(WSState.CONNECTED)
-                    attempt = 0
+                    connected_at = loop.time()
+                    stable = False
                     while not self._stop.is_set():
-                        raw = await asyncio.wait_for(ws.recv(), timeout=self.recv_timeout)
+                        timeout = self.recv_timeout
+                        if not stable:  # kararlılık süresi dolunca başarılı say
+                            left = self.stable_after - (loop.time() - connected_at)
+                            timeout = left if timeout is None else min(timeout, left)
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=max(timeout, 0.01)) \
+                                if timeout is not None else await ws.recv()
+                        except asyncio.TimeoutError:
+                            if not stable and loop.time() - connected_at >= self.stable_after:
+                                stable = True
+                                attempt = 0
+                                self.consecutive_failures = 0
+                                continue
+                            raise
+                        if not stable:
+                            stable = True
+                            attempt = 0
+                            self.consecutive_failures = 0
                         try:
                             msg = json.loads(raw)
                         except json.JSONDecodeError:
@@ -102,6 +135,9 @@ class ReconnectingWebSocket:
                 raise
             except Exception as exc:
                 log.warning("ws[%s] bağlantı hatası: %r", self.name, exc)
+                self.last_error = repr(exc)[:300]
+                if not stable:
+                    self.consecutive_failures += 1
             finally:
                 self._ws = None
             if self._stop.is_set():
@@ -117,7 +153,31 @@ class ReconnectingWebSocket:
         await self._set(WSState.DISCONNECTED)
 
 
-def market_stream_url(base: str, symbols: list[str], intervals: tuple[str, ...] = ("3m", "5m", "15m")) -> str:
+def market_stream_url(base: str, symbols: list[str], intervals: tuple[str, ...] = ("3m", "5m", "15m"),
+                      variant: int = 0) -> str:
+    """variant 0: klasik /stream ; variant 1: Binance'in 2026 yeni yolu /market/stream (kline, markPrice)."""
     streams = [f"{s.lower()}@kline_{iv}" for s in symbols for iv in intervals]
     streams.append("!markPrice@arr@1s")
-    return f"{base.rstrip('/')}/stream?streams={'/'.join(streams)}"
+    path = "/stream" if variant % 2 == 0 else "/market/stream"
+    return f"{base.rstrip('/')}{path}?streams={'/'.join(streams)}"
+
+
+USER_EVENTS = "ORDER_TRADE_UPDATE/ACCOUNT_UPDATE/ALGO_UPDATE"
+
+
+def user_stream_url(base: str, listen_key: str, variant: int = 0) -> str:
+    """Hesap (user data) stream adresi. Binance 2026'da yeni '/private' yolunu getirdi ve eski
+    yolları kaldırma sürecine girdi; hangi adresin çalıştığı ortama göre değişebildiği için
+    bağlanamazsa sıradaki biçim denenir."""
+    b = base.rstrip("/")
+    variants = [
+        f"{b}/private/ws?listenKey={listen_key}&events={USER_EVENTS}",
+        f"{b}/ws/{listen_key}",
+        f"{b}/private/ws?listenKey={listen_key}",
+    ]
+    return variants[variant % len(variants)]
+
+
+def pick_variant(preferred: int, failures: int, count: int) -> int:
+    """Son başarılı biçimden başla; her başarısız denemede bir sonrakine geç."""
+    return (preferred + failures) % count

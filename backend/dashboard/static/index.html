@@ -278,8 +278,17 @@
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
 
+  /* Telefonda sol menü gizli: SMC paneli ve çıkış için üstte düğmeler */
+  .mobile-links { display: none; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .mobile-links a, .mobile-links button {
+    display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px;
+    font: inherit; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer;
+    border: 1px solid var(--border, #2a2f3a); background: var(--card, #161a22); color: var(--text, #e6eaf0);
+  }
+  .mobile-links a.smc { background: var(--blue-bg); color: var(--blue); border-color: transparent; }
   @media (max-width: 900px) {
     .sidebar { display: none; }
+    .mobile-links { display: flex; }
     .main { padding: 16px; }
     .page-title { font-size: 18px; }
     .kpi .value { font-size: 22px; }
@@ -339,6 +348,10 @@
       <div>
         <div class="page-title">Dashboard</div>
         <div class="page-sub" id="lastUpdate">Yükleniyor...</div>
+        <div class="mobile-links">
+          <a class="smc" href="/smc/">🎯 SMC Paneli</a>
+          <form method="post" action="/logout" style="margin:0"><button type="submit">🚪 Çıkış</button></form>
+        </div>
       </div>
       <div class="status-pill unknown" id="statusPill" title="">
         <span class="dot"></span> <span id="statusText">Durum kontrol ediliyor…</span>
