@@ -80,3 +80,46 @@ def test_on_connected_error_does_not_drop_connection():
             await ws.stop()
             task.cancel()
     asyncio.run(go())
+
+
+def test_market_stream_survives_slow_backfill_under_message_flood():
+    """Sunucu saniyede yüzlerce mesaj basarken on_connected (backfill) uzun sürse bile bağlantı kopmamalı
+    ve mesajlar okunmaya devam etmeli."""
+    import json
+
+    async def go():
+        sent = {"n": 0}
+
+        async def handler(conn):
+            try:
+                while True:
+                    await conn.send(json.dumps({"data": {"e": "kline", "s": "X", "k": {"x": False}}}))
+                    sent["n"] += 1
+                    if sent["n"] % 50 == 0:
+                        await asyncio.sleep(0.01)
+            except websockets.ConnectionClosed:
+                pass
+
+        async with websockets.serve(handler, "127.0.0.1", 0, write_limit=2 ** 16) as server:
+            port = server.sockets[0].getsockname()[1]
+            got = {"n": 0}
+
+            async def on_msg(_):
+                got["n"] += 1
+
+            bg = {}
+
+            async def slow_backfill():  # worker gibi: arka plan görevi başlatır, hemen döner
+                bg["t"] = asyncio.create_task(asyncio.sleep(1.5))
+
+            async def url():
+                return f"ws://127.0.0.1:{port}/stream"
+
+            ws = ReconnectingWebSocket("market", url, on_msg, on_connected=slow_backfill, stable_after=0.3)
+            task = asyncio.create_task(ws.run())
+            await asyncio.sleep(2.0)
+            assert ws.state == WSState.CONNECTED and ws.reconnects == 0
+            assert got["n"] > 1000
+            await ws.stop()
+            task.cancel()
+    asyncio.run(go())

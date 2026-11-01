@@ -26,7 +26,7 @@ def make_settings(**kw) -> Settings:
     """Varsayılan account_scope=exclusive: şartnamedeki hesap genelinde davranış.
     Ortak hesap (shared) davranışı ayrı testlerde açıkça istenir."""
     base = dict(database_url="sqlite:///:memory:", telegram_bot_token="", telegram_chat_id="",
-                session_https_only=False, account_scope="exclusive")
+                session_https_only=False, account_scope="exclusive", profile="spec")
     base.update(kw)
     return Settings(_env_file=None, **{_SHARED.get(k, k): v for k, v in base.items()})
 

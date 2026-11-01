@@ -201,3 +201,41 @@ def test_dashboard_auth_health_and_kill_csrf(db):
     assert r.status_code == 200
     from backend.smc.database.repo import Repo
     assert [c.command for c in Repo(db).pending_commands()] == ["KILL"]
+
+
+def test_set_history_keeps_newer_ws_candles_and_flags_gaps():
+    st = CandleStore()
+    tf = 180_000
+    mk = lambda i: Candle(i * tf, 1, 1, 1, 1, 1, (i + 1) * tf - 1)  # noqa: E731
+    st.add_closed("X", "3m", mk(10))  # backfill sürerken WS'den gelen mum
+    st.add_closed("X", "3m", mk(11))
+    st.set_history("X", "3m", [mk(i) for i in range(0, 10)], server_now_ms=12 * tf)
+    assert [c.open_time // tf for c in st.get("X", "3m")] == list(range(12))
+    assert not st.has_gap("X", "3m")
+    st2 = CandleStore()
+    st2.add_closed("X", "3m", mk(20))
+    st2.set_history("X", "3m", [mk(i) for i in range(0, 10)], server_now_ms=21 * tf)
+    assert st2.has_gap("X", "3m")  # arada eksik mum var -> sinyal üretilmez, yeniden doldurulur
+
+
+def test_active_profile_relaxes_thresholds_only():
+    spec = make_settings(profile="spec")
+    act = make_settings(profile="active")
+    assert (spec.ote_low, spec.max_stop_pct, spec.trigger_break_bars) == (0.62, 0.03, 2)
+    assert (act.ote_low, act.max_stop_pct, act.trigger_break_bars, act.confirm_lookback_3m) == (0.50, 0.04, 1, 12)
+    # risk kuralları ve zorunlu puan eşiği değişmez
+    for k in ("risk_per_trade", "max_total_open_risk", "daily_loss_limit", "max_leverage", "max_open_positions",
+              "min_score", "min_rr", "liq_buffer_pct"):
+        assert getattr(spec, k) == getattr(act, k), k
+    # açıkça verilen değer profili ezer
+    assert make_settings(profile="active", max_stop_pct=0.025).max_stop_pct == 0.025
+
+
+def test_active_trigger_needs_one_bar_break():
+    from backend.smc.backtest.engine import _pre_trigger
+    tf = 180_000
+    c = [Candle(0, 10, 11.5, 9.8, 10.4, 1, tf - 1, 0.5),          # 2 önceki mum: high 11.5
+         Candle(tf, 10.4, 10.7, 10.3, 10.6, 1, 2 * tf - 1, 0.5),  # önceki mum:   high 10.7
+         Candle(2 * tf, 10.6, 10.9, 10.5, 10.8, 1, 3 * tf - 1, 0.8)]  # yükseliş mumu, kapanış 10.8
+    # son mumun high'ını (10.7) kırdı ama 2 öncekinin (11.5) kıramadı
+    assert _pre_trigger(c, 1) and not _pre_trigger(c, 2)
