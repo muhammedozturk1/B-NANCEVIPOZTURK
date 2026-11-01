@@ -148,3 +148,26 @@ def test_worker_virtual_equity_starts_at_100(db):
     pf = w._portfolio()
     assert pf.equity == pytest.approx(100.0) and pf.available_balance == pytest.approx(100.0)
     assert w.repo.state().day_start_equity == pytest.approx(100.0)
+
+
+def test_no_market_data_safe_mode_while_warming_up(db):
+    """Açılışta geçmiş veri arka planda inerken 'veri bayat' sanıp SAFE_MODE'a geçmemeli."""
+    import asyncio
+    import time as _t
+    from backend.smc.market_data.ws import WSState
+    w = make_worker(db)
+    w.universe = ["AAAUSDT", "BBBUSDT"]
+    w.ws_market.state = WSState.CONNECTED
+    w._market_connected_at = _t.monotonic()
+
+    async def one_beat():
+        task = asyncio.create_task(w.heartbeat_loop())
+        await asyncio.sleep(0.2)
+        w.request_stop()
+        task.cancel()
+    run(one_beat())
+    assert "market_data" not in w.safe_reasons
+    w._market_connected_at = _t.monotonic() - 600  # ısınma bitti, veri hâlâ yok -> SAFE_MODE
+    w._stop.clear()
+    run(one_beat())
+    assert "market_data" in w.safe_reasons

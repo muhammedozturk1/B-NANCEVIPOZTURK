@@ -223,9 +223,10 @@ def test_active_profile_relaxes_thresholds_only():
     act = make_settings(profile="active")
     assert (spec.ote_low, spec.max_stop_pct, spec.trigger_break_bars) == (0.62, 0.03, 2)
     assert (act.ote_low, act.max_stop_pct, act.trigger_break_bars, act.confirm_lookback_3m) == (0.50, 0.04, 1, 12)
-    # risk kuralları ve zorunlu puan eşiği değişmez
+    assert (act.slippage_pct, act.min_rr) == (0.0002, 1.0)
+    # risk limitleri ve zorunlu puan eşiği değişmez
     for k in ("risk_per_trade", "max_total_open_risk", "daily_loss_limit", "max_leverage", "max_open_positions",
-              "min_score", "min_rr", "liq_buffer_pct"):
+              "min_score", "liq_buffer_pct", "taker_fee"):
         assert getattr(spec, k) == getattr(act, k), k
     # açıkça verilen değer profili ezer
     assert make_settings(profile="active", max_stop_pct=0.025).max_stop_pct == 0.025
