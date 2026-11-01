@@ -219,11 +219,12 @@ def evaluate_direction(symbol: str, direction: Direction, c15: Sequence[Candle],
     snap["macro"] = ctx.fear_greed
 
     # 12) 3m final trigger (micro structure + delta)
-    last, p1, p2 = c3[-1], c3[-2], c3[-3]
+    last = c3[-1]
+    prev = c3[-1 - max(1, s.trigger_break_bars):-1]
     if direction == "bullish":
-        trig = last.bullish and last.close > max(p1.high, p2.high) and last.delta > 0 and last.close < leg_end
+        trig = last.bullish and last.close > max(c.high for c in prev) and last.delta > 0 and last.close < leg_end
     else:
-        trig = last.bearish and last.close < min(p1.low, p2.low) and last.delta < 0 and last.close > leg_end
+        trig = last.bearish and last.close < min(c.low for c in prev) and last.delta < 0 and last.close > leg_end
     trig = trig and ote_ok
     ev.add(Component("trigger_3m", 0, 0, trig, True, {"close": last.close, "delta": last.delta}))
     snap["trigger_3m"] = {"time": last.open_time, "close": last.close, "passed": trig}

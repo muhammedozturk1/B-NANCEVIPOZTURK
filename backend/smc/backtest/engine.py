@@ -72,13 +72,14 @@ class BacktestResult:
     signals: int
 
 
-def _pre_trigger(c3: list[Candle]) -> bool:
+def _pre_trigger(c3: list[Candle], bars: int = 2) -> bool:
     """3m final trigger'ın gerekli koşulu (her iki yön için). Hız optimizasyonu; sonucu değiştirmez."""
-    if len(c3) < 3:
+    bars = max(1, bars)
+    if len(c3) < bars + 1:
         return False
-    last, p1, p2 = c3[-1], c3[-2], c3[-3]
-    long_ok = last.bullish and last.close > max(p1.high, p2.high) and last.delta > 0
-    short_ok = last.bearish and last.close < min(p1.low, p2.low) and last.delta < 0
+    last, prev = c3[-1], c3[-1 - bars:-1]
+    long_ok = last.bullish and last.close > max(c.high for c in prev) and last.delta > 0
+    short_ok = last.bearish and last.close < min(c.low for c in prev) and last.delta < 0
     return long_ok or short_ok
 
 
@@ -157,7 +158,7 @@ class Backtester:
                 if i is None or sym in self.positions or sym in self.pending:
                     continue
                 c3 = tfs["3m"][max(0, i - 299): i + 1]
-                if not _pre_trigger(c3):
+                if not _pre_trigger(c3, self.s.trigger_break_bars):
                     continue
                 c5 = self._upto(sym, "5m", t, 300)
                 c15 = self._upto(sym, "15m", t, 200)

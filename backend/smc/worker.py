@@ -81,6 +81,7 @@ class TradingWorker:
                                              on_connected=self._on_user_connected, recv_timeout=None)
         self._url_variant = {"market": 0, "user": 0}  # son başarılı URL biçimi
         self._url_in_use = {"market": 0, "user": 0}
+        self._backfill_task: asyncio.Task | None = None
         self._scan_queue: asyncio.Queue[int] = asyncio.Queue()
         self._last_scanned = 0
         self._manage_now = asyncio.Event()
@@ -303,11 +304,27 @@ class TradingWorker:
             self.ws_market.restart()
 
     async def backfill(self, symbols: list[str]) -> None:
-        server_now = self.rest.time.timestamp()
         for sym in symbols:
             for tf in TFS:
                 rows = await self.rest.klines(sym, tf, limit=499)
-                self.candles.set_history(sym, tf, [Candle.from_rest(r) for r in rows], server_now)
+                self.candles.set_history(sym, tf, [Candle.from_rest(r) for r in rows], self.rest.time.timestamp())
+                await asyncio.sleep(0)  # WebSocket okumasını bekletme
+
+    def _needs_backfill(self, sym: str) -> bool:
+        now = now_ms()
+        return any(len(self.candles.get(sym, tf)) < 300 or self.candles.has_gap(sym, tf)
+                   or self.candles.is_stale(sym, tf, now, self.s.market_data_stale_factor) for tf in TFS)
+
+    async def _backfill_background(self) -> None:
+        """Bağlantı kurulunca eksik/bayat verisi olan sembolleri ARKA PLANDA doldurur. WebSocket bu sırada
+        okunmaya devam eder (eskiden backfill bitene kadar okunmuyordu ve Binance bağlantıyı kesiyordu)."""
+        try:
+            todo = [s for s in list(self.universe) if self._needs_backfill(s)]
+            if todo:
+                await self.backfill(todo)
+                self.repo.system("INFO", "backfill_done", f"{len(todo)} sembol")
+        except Exception as exc:
+            self.repo.system("WARNING", "backfill_failed", repr(exc))
 
     # ============================================================ websocket
     async def _market_url(self) -> str:
@@ -322,7 +339,9 @@ class TradingWorker:
         return user_stream_url(self.s.binance_ws_user_url, key, variant=v)
 
     async def _on_market_connected(self) -> None:
-        await self.backfill(self.universe)
+        if self._backfill_task is not None and not self._backfill_task.done():
+            return
+        self._backfill_task = asyncio.create_task(self._backfill_background())
 
     async def _on_user_connected(self) -> None:
         if self.ws_user.reconnects > 0:

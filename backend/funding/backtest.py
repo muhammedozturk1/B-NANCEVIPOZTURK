@@ -132,68 +132,21 @@ def load_data(market, symbols: list, days: int) -> dict:
     return data
 
 
-def compare_thresholds(data: dict, start_ms: int, end_ms: int, thresholds) -> list:
-    """Aynı veride farklı giriş eşiklerini dener. Diğer kurallar aynı kalır."""
-    c = config.FUNDING
-    saved = (c["entry_min_apr"], c["entry_last_min_apr"])
-    rows = []
-    try:
-        for apr in thresholds:
-            c["entry_min_apr"] = apr
-            c["entry_last_min_apr"] = min(saved[1], apr)
-            rep = report(simulate(data, start_ms, end_ms))
-            rows.append((apr, rep))
-    finally:
-        c["entry_min_apr"], c["entry_last_min_apr"] = saved
-    return rows
-
-
-def print_comparison(rows, start_ms: int, end_ms: int):
-    c = config.FUNDING
-    print(f"\n=== EŞİK KARŞILAŞTIRMASI | kasa {config.STARTING_BALANCE:.0f}$ | "
-          f"en fazla {c['max_positions']} pozisyon x kasanın %{c['position_pct'] * 100:.0f}'i ===")
-    print(f"{'Eşik':>6} | {'İşlem':>5} | {'Kârlı':>6} | {'Ort.gün':>7} | {'Toplam kasa':>11} | {'Yıllık':>7} | {'En kötü işlem':>13}")
-    print("-" * 78)
-    for apr, r in rows:
-        if not r.get("islem_sayisi"):
-            print(f"%{apr * 100:>5.0f} | {0:>5} | {'-':>6} | {'-':>7} | {'-':>11} | {'-':>7} | {'-':>13}")
-            continue
-        print(f"%{apr * 100:>5.0f} | {r['islem_sayisi']:>5} | %{r['kazanan_oran'] * 100:>5.0f} | "
-              f"{r['ort_tutma_gun']:>7} | %{r['toplam_kasa_getirisi_%']:>10} | %{r['yillik_kasa_getirisi_%']:>6} | "
-              f"%{r['en_kotu_islem_%']:>12}")
-    print("\nOkuma: 'Toplam kasa' ve 'Yıllık' kasanın tamamına göre net getiri (komisyon dahil).")
-    print("'En kötü işlem' tek bir pozisyonun kendi büyüklüğüne göre net sonucu.")
-    print("Yıllara göre (her eşik):")
-    for apr, r in rows:
-        if r.get("yila_gore"):
-            print(f"  %{apr * 100:.0f}: " + ", ".join(f"{y}: %{v['kasa_getirisi_%']} ({v['islem']} işlem)"
-                                                   for y, v in r["yila_gore"].items()))
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=1095)
     ap.add_argument("--top", type=int, default=config.TOP_SYMBOLS_COUNT)
-    ap.add_argument("--compare", action="store_true",
-                    help="%15, %12, %10 ve %8 giriş eşiklerini aynı veride karşılaştır")
     args = ap.parse_args()
 
     from backend.funding.market import FundingMarket
     market = FundingMarket()
     symbols = market.candidates(args.top)
     print(f"\n=== FONLAMA BACKTEST | {args.days} gün | {len(symbols)} parite (spot+vadeli) ===")
-    print("Veri indiriliyor, bu birkaç dakika sürebilir...")
     data = load_data(market, symbols, args.days)
     end = int(time.time() * 1000)
-    start = end - args.days * 86_400_000
-
-    if args.compare:
-        rows = compare_thresholds(data, start, end, [0.15, 0.12, 0.10, 0.08])
-        print_comparison(rows, start, end)
-        return
-
-    res = simulate(data, start, end)
+    res = simulate(data, end - args.days * 86_400_000, end)
     rep = report(res)
+
     c = config.FUNDING
     print(f"\nKurallar: giriş >= yıllık %{c['entry_min_apr']*100:.0f}, çıkış < %{c['exit_apr']*100:.0f}, "
           f"en fazla {c['max_positions']} pozisyon, pozisyon başı kasanın %{c['position_pct']*100:.0f}'i, "

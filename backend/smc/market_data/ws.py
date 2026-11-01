@@ -34,7 +34,8 @@ StateHandler = Callable[[str, WSState], Awaitable[None]]
 class ReconnectingWebSocket:
     def __init__(self, name: str, url_factory: Callable[[], Awaitable[str]], on_message: MessageHandler, *,
                  on_state: StateHandler | None = None, on_connected: Callable[[], Awaitable[None]] | None = None,
-                 max_backoff: float = 60.0, recv_timeout: float | None = 90.0, stable_after: float = 10.0):
+                 max_backoff: float = 60.0, recv_timeout: float | None = 90.0, stable_after: float = 10.0,
+                 max_queue: int | None = 4096):
         """recv_timeout: bu kadar saniye mesaj gelmezse bağlantı ölü sayılır. Sürekli veri akan
         market stream için uygundur; hesap hareketsizken sessiz kalan user stream için None verilir
         (ölü bağlantı tespiti WebSocket ping/pong ile yapılır)."""
@@ -54,6 +55,9 @@ class ReconnectingWebSocket:
         # kapatabilir; bu yüzden bağlantı ancak `stable_after` sn ayakta kalırsa veya mesaj gelirse başarılı sayılır.
         self.consecutive_failures = 0
         self.stable_after = stable_after
+        # Gelen mesaj tamponu. Küçük olursa (websockets varsayılanı 16) yoğun market stream'de okuma
+        # birkaç saniye gecikince soket okunmaz hale gelir ve Binance bağlantıyı "yavaş istemci" diye keser.
+        self.max_queue = max_queue
         self.last_error: str | None = None
 
     @property
@@ -90,7 +94,7 @@ class ReconnectingWebSocket:
                 await self._set(WSState.RECONNECTING)
                 url = await self.url_factory()
                 async with websockets.connect(url, ping_interval=60, ping_timeout=30, max_size=2 ** 23,
-                                              open_timeout=15) as ws:
+                                              max_queue=self.max_queue, open_timeout=15) as ws:
                     self._ws = ws
                     self._restart.clear()
                     await self._set(WSState.RESUBSCRIBING)  # combined stream URL ile abonelik yapılır

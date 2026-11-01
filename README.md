@@ -38,6 +38,12 @@ Yeniden başlatmak için: `python reset_bot.py --smc`.
 - Funding paneli: `/` · SMC paneli: `/smc/` (soldaki menüde "SMC Paneli"). SMC panelinde hesap/risk özeti,
   açık pozisyonlar, interaktif grafik (entry/SL/TP, sweep, BOS/CHoCH, OTE, FVG), trade replay ve **KILL SWITCH** var.
 
+### SMC strateji modu (`SMC_PROFILE`)
+- **active (varsayılan):** Zorunlu kontrollerin hepsi (15dk trend, likidite süpürmesi, 5dk kırılım, OTE, 3dk onay)
+  ve risk kuralları (%5 / %15 / %10, 10x) aynı kalır; yalnızca eşikler gevşer: OTE %50–79, OTE dokunuşu son 12 adet
+  3m mumda, onay mumu son 1 mumu kırmalı, stop en fazla %4, süpürme son 5 saatte aranır.
+- **spec:** Şartname eşikleri birebir (OTE %62–79, 6 mum, 2 mum kırılım, stop ≤ %3, 3 saat). Çok seçici, işlem nadir.
+
 ### SMC ayarları
 Tüm SMC parametreleri `SMC_` önekiyle değiştirilir (örn. `SMC_MIN_SCORE=10`, `SMC_RISK_PER_TRADE=0.02`).
 Tam liste: `backend/smc/config.py`. SMC'yi kapatmak için `SMC_ENABLED=false`.

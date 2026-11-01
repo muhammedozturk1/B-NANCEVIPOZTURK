@@ -147,6 +147,7 @@ async function refresh() {
   $("risk").innerHTML = kv([["Risk / trade", pct(r.risk_per_trade)], ["Max open risk", pct(r.max_open_risk)],
     ["Daily loss limit", pct(r.daily_loss_limit)], ["Current open risk", `${f(r.current_open_risk,3)} (${pct(r.current_open_risk_pct)})`],
     ["Margin usage", pct(r.margin_usage_pct)], ["Max leverage", r.max_leverage+"x"],
+    ["Strateji modu", r.profile === "active" ? "Aktif" : "Şartname"],
     ["Ardışık SL", r.consecutive_losses], ["Cooldown", r.cooldown_until ? new Date(r.cooldown_until).toLocaleTimeString() : "–"]]);
   $("riskbar").style.width = Math.min(100, r.current_open_risk_pct / r.max_open_risk * 100) + "%";
   $("dlbar").style.width = Math.min(100, dl*100) + "%";

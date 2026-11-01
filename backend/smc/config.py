@@ -20,6 +20,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 ALLOWED_TRADING_HOSTS = frozenset({"testnet.binancefuture.com", "demo-fapi.binance.com"})
 
 
+# "active" profilde değişen eşikler. Zorunlu kontroller (15m yapı, 5m BOS/CHoCH, sweep, OTE, 3m onay)
+# ve risk limitleri (%5 / %15 / %10, 10x, liq buffer) değişmez.
+ACTIVE_PROFILE = {
+    "ote_low": 0.50,             # giriş bölgesi %62–79 yerine %50–79
+    "confirm_lookback_3m": 12,   # OTE dokunuşu son 6 yerine son 12 adet 3m mumda aranır (36 dk)
+    "trigger_break_bars": 1,     # onay mumu son 2 yerine son 1 mumun high/low'unu kırmalı
+    "max_stop_pct": 0.04,        # stop en fazla %3 yerine %4 uzaklıkta olabilir
+    "sweep_lookback": 60,        # likidite süpürmesi son 3 saat yerine son 5 saatte aranır
+}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore",
                                       env_prefix="SMC_", populate_by_name=True)
@@ -31,6 +42,11 @@ class Settings(BaseSettings):
     #   başka bir botun pozisyonu olan sembollerde SMC işlem açmaz.
     # exclusive: hesap yalnızca SMC'ye ait; şartnamedeki hesap genelinde "0 pozisyon / 0 emir" doğrulaması.
     account_scope: Literal["shared", "exclusive"] = "shared"
+    # Strateji profili (SMC_PROFILE):
+    #   spec   : şartname v2.1 eşikleri birebir (çok seçici, işlem nadir).
+    #   active : zorunlu kontroller ve risk kuralları AYNI; yalnızca eşikler gevşek (bkz. ACTIVE_PROFILE).
+    # Bir parametre env ile açıkça verilirse (örn. SMC_MAX_STOP_PCT) profil onu ezmez.
+    profile: Literal["spec", "active"] = "active"
 
     # ------------------------------------------------------------------ ortam
     trading_env: Literal["testnet", "demo"] = "testnet"
@@ -132,7 +148,8 @@ class Settings(BaseSettings):
     min_leg_atr: float = 1.5
     sl_buffer_atr: float = 0.10
     atr_period: int = 14
-    confirm_lookback_3m: int = 6
+    confirm_lookback_3m: int = 6  # OTE'ye dokunuşun aranacağı son 3m mum sayısı
+    trigger_break_bars: int = 2  # 3m onay mumu son kaç mumun high/low'unu kırmalı
     sessions_utc: str = "0-7,7-12,12-20,20-24"
     oi_change_threshold: float = 0.002
     funding_extreme: float = 0.0005
@@ -167,6 +184,10 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------------- doğrulama
     @model_validator(mode="after")
     def _validate(self) -> "Settings":
+        if self.profile == "active":
+            for key, value in ACTIVE_PROFILE.items():
+                if key not in self.model_fields_set:
+                    setattr(self, key, value)
         host = urlparse(self.binance_rest_url).hostname or ""
         if host not in ALLOWED_TRADING_HOSTS:
             raise ValueError(

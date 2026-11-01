@@ -19,13 +19,21 @@ class CandleStore:
         return self._data[key]
 
     def set_history(self, symbol: str, tf: str, candles: list[Candle], server_now_ms: int) -> None:
+        """REST geçmişini yükler. Backfill WebSocket açıkken arka planda yapıldığı için, bu sırada
+        WebSocket'ten gelmiş daha yeni kapanmış mumlar korunur (birleştirilir)."""
         dq = self._dq(symbol, tf)
+        hist = [c for c in candles if c.close_time < server_now_ms]  # açık mumu at
+        last_hist = hist[-1].open_time if hist else -1
+        newer = [c for c in dq if c.open_time > last_hist]
         dq.clear()
-        for c in candles:
-            if c.close_time < server_now_ms:  # açık mumu at
-                dq.append(c)
-        if dq:
-            self.last_update_ms[(symbol, tf)] = dq[-1].close_time
+        for c in hist + newer:
+            dq.append(c)
+        if not dq:
+            return
+        items = list(dq)
+        step = TIMEFRAME_MS[tf]
+        gap = any(b.open_time - a.open_time > step for a, b in zip(items, items[1:]))
+        self.last_update_ms[(symbol, tf)] = -1 if gap else items[-1].close_time
 
     def add_closed(self, symbol: str, tf: str, candle: Candle) -> bool:
         """Kapanmış mumu ekler. Yeni mumsa True döner."""

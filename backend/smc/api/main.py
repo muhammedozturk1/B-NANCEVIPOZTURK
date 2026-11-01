@@ -229,6 +229,7 @@ def create_smc_app(settings: Settings | None = None, db: Database | None = None)
             "risk": {
                 "risk_per_trade": s.risk_per_trade, "max_open_risk": s.max_total_open_risk,
                 "daily_loss_limit": s.daily_loss_limit, "current_open_risk": open_risk_total,
+                "profile": s.profile,
                 "current_open_risk_pct": open_risk_total / equity if equity else 0,
                 "margin_usage_pct": (st.margin_used or 0) / equity if equity else 0, "max_leverage": s.max_leverage,
                 "consecutive_losses": st.consecutive_losses,
