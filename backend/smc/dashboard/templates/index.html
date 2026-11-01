@@ -94,7 +94,7 @@ const REASON_TR = {
   stop_too_tight: v => `stop çok yakın (%${parseFloat(v).toFixed(2)})`,
   score_below_min: v => `puan yetersiz (${v})`,
   mandatory_failed: v => "zorunlu kontrol eksik: " + v.split(",").map(x => COMP_TR[x] || x).join(", "),
-  rr_below_min: v => `kazanç/risk oranı düşük (${v}, en az 1.2)`,
+  rr_below_min: v => `kazanç/risk oranı düşük (${v})`,
   gate: v => ({websocket_not_ready:"websocket bağlı değil", SAFE_MODE:"güvenli mod", COOLDOWN:"bekleme süresi",
                EMERGENCY_STOP:"kill switch aktif", EXPIRED:"trial bitti", INITIALIZING:"bot açılıyor",
                RECONCILIATION_REQUIRED:"kontrol gerekiyor", trial_expired:"trial bitti", clock_not_synced:"saat senkron değil"})[v] || v,
@@ -108,7 +108,7 @@ const REASON_TR = {
   "risk:total_open_risk": () => "toplam açık risk %15'i aşar",
   "risk:sizing": v => "pozisyon boyutu uygun değil (" + ({liquidation_buffer_insufficient:"likidasyona çok yakın",
        qty_below_min:"miktar çok küçük", notional_below_min:"tutar çok küçük"}[v] || v) + ")",
-  "risk:rr_below_min": v => `kazanç/risk oranı düşük (${v}, en az 1.2)`,
+  "risk:rr_below_min": v => `kazanç/risk oranı düşük (${v})`,
   foreign_position_on_symbol: () => "bu coinde diğer botun pozisyonu var",
 };
 function trReason(r) {

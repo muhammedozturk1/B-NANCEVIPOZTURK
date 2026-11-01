@@ -28,6 +28,8 @@ ACTIVE_PROFILE = {
     "trigger_break_bars": 1,     # onay mumu son 2 yerine son 1 mumun high/low'unu kırmalı
     "max_stop_pct": 0.04,        # stop en fazla %3 yerine %4 uzaklıkta olabilir
     "sweep_lookback": 60,        # likidite süpürmesi son 3 saat yerine son 5 saatte aranır
+    "slippage_pct": 0.0002,      # taraf başı tahmini kayma %0.05 yerine %0.02 (likit top-25 coin; ana botla aynı)
+    "min_rr": 1.0,               # maliyet SONRASI ağırlıklı RR alt sınırı 1.2 yerine 1.0
 }
 
 

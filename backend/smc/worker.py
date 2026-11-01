@@ -82,6 +82,7 @@ class TradingWorker:
         self._url_variant = {"market": 0, "user": 0}  # son başarılı URL biçimi
         self._url_in_use = {"market": 0, "user": 0}
         self._backfill_task: asyncio.Task | None = None
+        self._market_connected_at = 0.0  # monotonic; açılışta veri bayat kontrolü için bekleme süresi
         self._scan_queue: asyncio.Queue[int] = asyncio.Queue()
         self._last_scanned = 0
         self._manage_now = asyncio.Event()
@@ -339,6 +340,7 @@ class TradingWorker:
         return user_stream_url(self.s.binance_ws_user_url, key, variant=v)
 
     async def _on_market_connected(self) -> None:
+        self._market_connected_at = time.monotonic()
         if self._backfill_task is not None and not self._backfill_task.done():
             return
         self._backfill_task = asyncio.create_task(self._backfill_background())
@@ -401,7 +403,9 @@ class TradingWorker:
             else:
                 self.safe_reasons.discard("db")
                 now = now_ms()
-                if self.ws_market.ready and self.universe:
+                warming = (self._backfill_task is not None and not self._backfill_task.done()) or \
+                    time.monotonic() - self._market_connected_at < 240
+                if self.ws_market.ready and self.universe and not warming:
                     stale = [s for s in self.universe if self.candles.is_stale(s, "3m", now, self.s.market_data_stale_factor)]
                     if len(stale) > len(self.universe) / 2:
                         await self.enter_safe_mode("market_data")
