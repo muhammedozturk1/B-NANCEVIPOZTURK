@@ -7,6 +7,9 @@ _DB = os.path.join(tempfile.mkdtemp(prefix="botdb_"), "test.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB}"
 os.environ["TELEGRAM_BOT_TOKEN"] = ""
 os.environ["TELEGRAM_CHAT_ID"] = ""
+# SMC Bot (backend/smcbot) dashboard'a gömülü: testlerde varsayılan kapalı ve internetsiz
+os.environ["SMCBOT_ENABLED"] = "false"
+os.environ["SMCBOT_OFFLINE_SIM"] = "true"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Dashboard artık şifreli: testler için bilinen bir şifre

@@ -1,6 +1,6 @@
 """Dashboard katmanı.
 
-- `install_auth(app, ...)`: Mevcut botun dashboard'u (funding paneli) DAHİL tüm panele tek bir
+- `install_auth(app, ...)`: Mevcut botun dashboard'u (SMC Bot paneli) DAHİL tüm panele tek bir
   oturum açma ekranı ekler: PBKDF2 şifre hash'i, imzalı session cookie (SameSite=strict),
   giriş denemesi sınırı ve state değiştiren isteklerde Origin kontrolü.
 - `create_smc_app(...)`: SMC paneli (/smc altına mount edilir). Trading engine'den bağımsızdır:

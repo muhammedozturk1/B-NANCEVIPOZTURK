@@ -1,8 +1,77 @@
-# Kripto Bot v3.2 — Funding + SMC Scalper
+# Kripto Bot v4 — SMC Bot + SMC Scalper
 
-## v3.2 — Yeni: SMC Scalper (şartname v2.1) ve şifreli panel
+## v4 — Yeni: SMC Bot (funding botunun yerine)
 
-Mevcut bot aynen çalışmaya devam ediyor (fonlama motoru, scalp/day/swing, AI filtresi).
+Fonlama (funding) botu ve paneli **kaldırıldı**. Yerine **SMC Bot** geldi; paneli artık ana sayfa (`/`).
+**SMC Scalper** (`backend/smc`, panel `/smc/`) ve kapalı scalp/day/swing motorları olduğu gibi duruyor.
+
+| Servis | Ne çalışır | Panel |
+|---|---|---|
+| `crypto-bot-dashboard` (web) | **SMC Bot** motoru + tüm paneller | `/` SMC Bot · `/smc/` SMC Scalper |
+| `crypto-bot-engine` (worker) | SMC Scalper (+ kapalı yönlü motorlar) | — |
+
+### SMC Bot ne yapar?
+En hacimli 30 vadeli coini her 15 dk mum kapanışında tarar: likidite avı → MSS → FVG (SMC/ICT) yapısını
+order flow verisiyle (CVD, Binance likidasyon akışı, tahmini likidasyon haritası, OI, funding, emir defteri) puanlar.
+10x kaldıraçla long/short açar, 1R'de yarısını kapatıp stopu girişe çeker, hedefi bir sonraki likidite seviyesidir.
+Her işlemin grafiği (av, MSS, FVG, giriş/stop/TP, çıkış) ve "neden girildi" listesi panelde görünür.
+Telegram'a `[SMC Bot · DEMO]` etiketiyle bildirim gider (SMC Scalper'ınkiler `[SMC·TESTNET]`).
+
+- **Modlar:** Demo (varsayılan; gerçek fiyat, sanal 1000 USDT, emir yok) → Testnet → Gerçek.
+- **Gerçek mod kilitli:** demoda en az 100 işlem, pozitif K/Z ve profit factor ≥ 1,2 olmadan açılmaz.
+- **Risk kuralları:** stop mesafesine göre pozisyon büyüklüğü, günlük zarar limiti, art arda 3 stopta 4 saat soğuma,
+  zirveden %30 düşüşte otomatik durma, en fazla 3 pozisyon. İşlem başı risk varsayılanı **%5** (panelden değişir; %1–2 önerilir).
+- **İlk açılışta bot DURAKLATILMIŞTIR:** panelde **Başlat**'a basınca demo modda işlem aramaya başlar.
+
+### Dürüst sonuç (gerçek Binance verisiyle geçmiş test)
+Mayıs–Ekim 2026, en hacimli 15 coin, 15 dk, komisyon + kayma dahil, işlem başı %1 risk:
+170 işlem, ortalama **−0,10R**, profit factor **0,79**. Mayıs–Temmuz −0,29R, Ağustos–Ekim +0,10R.
+Yani tutarlı bir avantaj henüz görünmüyor; %5 riskle aynı dönem kasayı −%65'e götürdü.
+Canlı order flow verisi geçmişte olmadığı için testte yok; etkisini ancak demo gösterir. Panelde
+**Geçmiş test** sekmesinden güncel veriyle tekrar test edilebilir.
+
+### Kurulum (mevcut Render kurulumuna ek)
+1. Bu sürüm main'e gelince Render iki servisi de yeniden kurar. Ek veritabanı veya disk gerekmez:
+   SMC Bot mevcut Postgres'i `smcbot_` önekli tablolarla kullanır.
+2. **Telegram:** `render.yaml`, dashboard servisine `TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID`'yi worker'dan
+   otomatik kopyalar. Panel > Ayarlar > "Telegram'a deneme mesajı gönder" ile kontrol et. Mesaj gelmezse Render >
+   crypto-bot-dashboard > Environment'a bu iki değeri elle ekle.
+3. **Testnet modu** dashboard'daki mevcut `BINANCE_API_KEY`/`SECRET`'i (testnet anahtarı) kullanır.
+   Ayrı anahtar istersen `SMCBOT_TESTNET_API_KEY`/`SECRET` ekle. Testnet hesabı SMC Scalper ile ortaktır:
+   SMC Bot, başka pozisyon olan coinde işlem açmaz ve sadece kendi stop/TP emirlerini iptal eder.
+4. **Gerçek mod** için ayrı anahtar gerekir: `SMCBOT_LIVE_API_KEY` / `SMCBOT_LIVE_API_SECRET`
+   (sadece Futures izni, **çekim izni kapalı**, IP kısıtlı). Render bu `sync: false` değişkenleri mevcut servise
+   otomatik eklemez; gerektiğinde Environment'tan elle ekle.
+5. İsteğe bağlı: `COINGLASS_API_KEY` (ücretli) eklenirse CoinGlass likidasyon ısı haritası da hedef seçiminde kullanılır.
+
+| Değişken (dashboard servisi) | Varsayılan | Açıklama |
+|---|---|---|
+| `SMCBOT_ENABLED` | `true` | `false` yapılırsa SMC Bot hiç çalışmaz |
+| `SMCBOT_TESTNET_REST_URL` | `https://demo-fapi.binance.com` | Testnet REST adresi |
+| `SMCBOT_ALLOW_LIVE_WITHOUT_GATE` | `false` | Gerçek mod kilidini kaldırır (önerilmez) |
+| `SMCBOT_OFFLINE_SIM` | `false` | Geliştirme: Binance yerine sentetik piyasa |
+
+### Render deploy geçişi
+Render yeni sürümü açarken eski kopya kısa bir süre daha çalışır. Aynı anda iki kopyanın işlem açmaması için
+veritabanında bir **yönetim kilidi** (`smcbot_lease`) var: işlemi sadece kilidi tutan kopya yapar. Eski kopya
+kapanırken kilidi bırakır, yenisi birkaç saniyede devralır. Bu arada panelde "Bu sunucu kopyası yedekte" yazabilir.
+
+### Kaldırılanlar
+- `backend/funding/`, funding paneli ve `/api/summary`, `/api/funding`, `/api/cumulative` vb. eski panel API'leri.
+- Eski panelde yönlü (scalp/day/swing) motor işlemleri de görünüyordu; bu motorlar varsayılan kapalı olduğu için
+  yeni panelde yok. Veritabanındaki `funding_positions` ve `trades` tabloları silinmedi, veriler duruyor.
+
+### Testler
+```bash
+pip install -r requirements.txt pytest && python -m pytest tests     # internet gerekmez
+python -m pytest tests/smcbot                                        # sadece SMC Bot
+```
+
+---
+
+# v3.2 — SMC Scalper ve şifreli panel (hâlâ geçerli)
+
+v3.2'de eklenen SMC Scalper v4'te de aynen çalışıyor (fonlama motoru v4'te kaldırıldı).
 Bunlara **dokunulmadı**; şartnamedeki scalping botu `backend/smc/` altına ayrı bir modül olarak eklendi.
 
 **Nasıl çalışır?**
@@ -35,7 +104,7 @@ Yeniden başlatmak için: `python reset_bot.py --smc`.
 
 ### Panel
 - **Tüm panel artık şifreli** (eskiden adresi bilen herkes açabiliyor ve işlem kapatabiliyordu). `/health` şifresizdir.
-- Funding paneli: `/` · SMC paneli: `/smc/` (soldaki menüde "SMC Paneli"). SMC panelinde hesap/risk özeti,
+- SMC Bot paneli: `/` · SMC Scalper paneli: `/smc/` (SMC Bot panelinde "SMC Scalper" bağlantısı). SMC panelinde hesap/risk özeti,
   açık pozisyonlar, interaktif grafik (entry/SL/TP, sweep, BOS/CHoCH, OTE, FVG), trade replay ve **KILL SWITCH** var.
 
 ### SMC strateji modu (`SMC_PROFILE`)
@@ -66,46 +135,7 @@ kazanç göstermemişti (aşağıdaki "Neden strateji değişti?"); SMC kuruluml
 
 # Kripto Bot v3 — Fonlama Oranı (Funding) Stratejisi
 
-## v3.1 — Düzeltmeler
-- **Bot artık testnet'e takılıp durmuyor.** Eskiden açılışta testnet bakiyesi okunamazsa TÜM bot kapanıyordu;
-  oysa fonlama motoru (paper) API key'e hiç ihtiyaç duymuyor. Testnet bağlantısı artık sadece yönlü motorlar açıksa gerekli.
-- **"Bot Çalışıyor" rozeti gerçek.** Worker 5 dakikada bir veritabanına sinyal yazıyor; 15 dakika sessiz kalırsa rozet kırmızıya döner.
-- **Fonlama taraması görünür.** Dashboard'da son tarama zamanı, kaç coinin incelendiği, en iyi adayların oranı ve
-  neden girilmediği yazıyor. Son hata da gösteriliyor.
-- **Dashboard:** kümülatif grafik artık gerçek tarihli ve fonlama K/Z'sini de içeriyor; tarihler 3 saat kayık
-  görünmüyor (UTC işareti eklendi); ROI komisyon dahil net K/Z'den hesaplanıyor (eskiden PnL eksiyken ROI artı çıkabiliyordu);
-  yeni "R" sütunu (net K/Z / risk); "Erken Kapama" etiketi "Zaman stopu / Elle" oldu.
-- Telegram heartbeat ve haftalık özet fonlama pozisyonlarını da içeriyor.
-- `backend/lab.py` olmayan modülleri import ettiği için hiç çalışmıyordu, düzeltildi.
-- `tests/` klasörü: internet gerektirmeyen testler -> `pip install pytest httpx && python -m pytest tests`
-
-
-## Neden strateji değişti?
-v2'deki kısa vadeli grafik kuralları (EMA geri çekilme, likidite süpürme, Bollinger dönüşü),
-100 coin ve 2-3 yıllık veride, üç farklı zaman diliminde test edildi. Komisyon sonrası
-hiçbiri tutarlı kazanç göstermedi. Bu motorlar artık varsayılan olarak KAPALI.
-
-## Yeni strateji nasıl kazanır?
-Vadeli işlemlerde long ve short tutanlar her 1/4/8 saatte bir birbirine "fonlama" öder.
-Oran pozitifken long'lar short'lara öder. Bot aynı coini **spot'ta alır** ve vadelide
-**aynı miktar short açar**. Fiyat ne yöne giderse gitsin iki bacak birbirini dengeler;
-bot sadece fonlama ödemelerini toplar. Fiyat tahmini yoktur.
-
-- Giriş: son 3 günün ortalama fonlaması yıllık %15+ ve hiç negatif ödeme yok
-- Çıkış: ortalama yıllık %3 altına düşerse, fonlama negatife dönerse veya fiyat %30 oynarsa
-- En az 3 gün tutulur. DİKKAT: giriş-çıkış maliyeti ~%0.42; yıllık %15 fonlamayla bu ancak ~10 günde çıkar
-  (eski metindeki "3 gün yeter" hesabı yanlıştı). Bot artık her aday için bu süreyi gösteriyor.
-- En fazla 5 pozisyon, her biri kasanın %12'si (vadeli bacak 2x teminatla)
-
-## Mod: paper (sanal)
-Gerçek Binance fiyat ve fonlama verisiyle sanal işlem yapılır, emir gönderilmez.
-Testnetin fonlama oranları gerçek olmadığı için bu strateji için paper modu testnetten
-daha gerçekçidir. Gerçek parayla çalıştırma (live) ayrı bir adım olarak eklenecek.
-
-## Backtest (Codespace'te)
-```bash
-python -u -m backend.funding.backtest --days 1095
-```
+**v4'te kaldırıldı.** Yerine SMC Bot geldi (yukarıya bak).
 
 ---
 

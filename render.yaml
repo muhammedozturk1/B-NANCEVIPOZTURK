@@ -61,7 +61,7 @@ services:
     startCommand: "uvicorn backend.dashboard.api:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'"
     healthCheckPath: /health
     envVars:
-      # --- Panel girişi (funding + SMC) ---
+      # --- Panel girişi (SMC Bot + SMC Scalper) ---
       - key: DASHBOARD_USERNAME
         sync: false
       - key: DASHBOARD_PASSWORD_HASH   # python -m scripts.smc.hash_password çıktısı
@@ -82,3 +82,22 @@ services:
         fromDatabase:
           name: crypto-bot-db
           property: connectionString
+      # --- SMC Bot (backend/smcbot): bu servisin içinde çalışır, paneli "/" ---
+      - key: SMCBOT_ENABLED
+        value: "true"
+      - key: TELEGRAM_BOT_TOKEN       # worker'daki değer otomatik kopyalanır
+        fromService:
+          type: worker
+          name: crypto-bot-engine
+          envVarKey: TELEGRAM_BOT_TOKEN
+      - key: TELEGRAM_CHAT_ID
+        fromService:
+          type: worker
+          name: crypto-bot-engine
+          envVarKey: TELEGRAM_CHAT_ID
+      - key: SMCBOT_LIVE_API_KEY      # sadece gerçek moda geçince gerekir (çekim izni KAPALI anahtar)
+        sync: false
+      - key: SMCBOT_LIVE_API_SECRET
+        sync: false
+      - key: COINGLASS_API_KEY        # isteğe bağlı, ücretli
+        sync: false

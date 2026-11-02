@@ -1,8 +1,8 @@
 """
-ANA ÇALIŞMA DÖNGÜSÜ
+ANA ÇALIŞMA DÖNGÜSÜ (worker servisi: crypto-bot-engine)
 
-  - Fonlama motoru (v3 ana strateji): saatte bir, her saatin 5. dakikası.
-    Paper modunda API key GEREKMEZ, sadece Binance'in herkese açık verisini okur.
+  - v4: Fonlama (funding) motoru kaldırıldı. Yerine gelen SMC Bot, dashboard servisinde
+    (backend/smcbot) çalışır; bu worker'a dokunmaz.
   - SMC Scalper (şartname v2.1, backend/smc): ayrı thread'de, kendi asyncio döngüsüyle.
     WebSocket ile 3m/5m/15m veri, native SL/TP, %5/%15/%10 risk motoru. SMC_ENABLED ile açılıp kapanır.
   - Yönlü motorlar (scalp/day/swing): varsayılan KAPALI. Açıksa kendi mumlarının
@@ -20,7 +20,6 @@ from backend.db import status as bot_status
 from backend.db.database import init_db
 from backend.engines import scalp, day, swing
 from backend.risk import position_monitor
-from backend.funding import engine as funding_engine
 from backend.telegram import notifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -37,14 +36,6 @@ def run_engine_safely(engine_module, client):
     except Exception as e:
         logger.exception(f"{engine_module.ENGINE_NAME} motorunda beklenmeyen hata: {e}")
         bot_status.mark_error(engine_module.ENGINE_NAME, e)
-
-
-def run_funding_safely():
-    try:
-        funding_engine.run_cycle()
-    except Exception as e:
-        logger.exception(f"[funding] döngü hatası: {e}")
-        bot_status.mark_error("funding", e)
 
 
 def run_position_monitor_safely(client):
@@ -99,7 +90,7 @@ def startup_checks():
         client = connect_exchange()
         if client is None:
             logger.error(f"Yönlü motorlar ({', '.join(enabled)}) borsa bağlantısı olmadan çalışamaz, "
-                         f"bu oturumda KAPALI. Fonlama motoru etkilenmez.")
+                         f"bu oturumda KAPALI. SMC Scalper etkilenmez.")
         else:
             logger.info(f"Tarama modu: DİNAMİK - en aktif {config.TOP_SYMBOLS_COUNT} parite, "
                         f"min. hacim: {config.MIN_24H_VOLUME_USDT:,.0f}$")
@@ -108,8 +99,8 @@ def startup_checks():
     else:
         logger.info("Yönlü motorlar kapalı -> borsa (testnet) bağlantısı gerekmiyor.")
 
-    if not enabled and not config.FUNDING["enabled"]:
-        logger.warning("⚠️ Hiçbir motor açık değil! (ENGINE_* ve FUNDING_ENABLED ayarlarını kontrol et)")
+    if not enabled:
+        logger.info("Worker'da SMC Scalper çalışır (SMC_ENABLED). SMC Bot dashboard servisinde çalışır.")
 
     bot_status.beat()
     logger.info("=== KONTROLLER TAMAMLANDI, BOT ÇALIŞMAYA BAŞLIYOR ===")
@@ -140,13 +131,6 @@ def build_scheduler(client) -> BlockingScheduler:
         tf = config.ENGINE_TIMEFRAMES[name]["entry"]
         scheduler.add_job(run_engine_safely, "cron", args=[module, client], id=f"{name}_engine",
                           max_instances=1, coalesce=True, **CRON_FOR_TF[tf])
-
-    if config.FUNDING["enabled"]:
-        logger.info(f"[funding] Fonlama motoru AKTİF | mod: {config.FUNDING['mode']} | "
-                    f"en fazla {config.FUNDING['max_positions']} pozisyon | her saatin 5. dakikası")
-        scheduler.add_job(run_funding_safely, "cron", minute=5, second=0, id="funding_engine",
-                          max_instances=1, coalesce=True)
-        scheduler.add_job(run_funding_safely, "date", id="funding_first_run")  # açılışta hemen bir kez
 
     if client is not None:
         scheduler.add_job(run_position_monitor_safely, "interval",

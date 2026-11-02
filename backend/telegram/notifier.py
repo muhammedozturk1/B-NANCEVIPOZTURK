@@ -17,7 +17,6 @@ import requests
 from datetime import datetime, timedelta
 from backend import config
 from backend.db import repository
-from backend.db.database import get_session
 from backend.db.models import Trade, TradeStatus
 
 logger = logging.getLogger("notifier")
@@ -106,48 +105,27 @@ def send_trade_update(trade: Trade, event: str):
         _send_raw(text)
 
 
-def _funding_positions(since=None):
-    from backend.db.models import FundingPosition
-    session = get_session()
-    try:
-        q = session.query(FundingPosition)
-        rows = q.all()
-        if since is not None:
-            rows = [p for p in rows if p.status == "open" or (p.closed_at and p.closed_at >= since)]
-        return rows
-    finally:
-        session.close()
-
-
 def send_heartbeat():
     """Bot her HEARTBEAT_INTERVAL_MINUTES'te bir bu mesajı gönderir.
     Mesajlar kesilirse bot çökmüş demektir - harici izleme olmadan en basit yöntem."""
     open_trades = repository.get_open_trades()
     virtual_balance = repository.get_virtual_balance()
-    f_open = [p for p in _funding_positions() if p.status == "open"]
-    f_unreal = sum(p.unrealized_pnl_usd or 0 for p in f_open)
-    f_collected = sum(p.funding_usd or 0 for p in f_open)
     text = (
-        f"💓 Bot çalışıyor.\n"
-        f"Sanal kasa: {virtual_balance:.2f}$\n"
-        f"Açık yönlü işlem: {len(open_trades)}\n"
-        f"Açık fonlama pozisyonu: {len(f_open)}/{config.FUNDING['max_positions']}"
-        + (f" | toplanan {f_collected:+.4f}$ | anlık net {f_unreal:+.4f}$" if f_open else "")
+        f"💓 Worker çalışıyor (SMC Scalper + yönlü motorlar).\n"
+        f"Sanal kasa (yönlü motorlar): {virtual_balance:.2f}$\n"
+        f"Açık yönlü işlem: {len(open_trades)}"
     )
     _send_raw(text)
 
 
 def send_weekly_summary():
-    """Son 7 günün motor bazlı performans özetini gönderir (yönlü motorlar + fonlama)."""
+    """Son 7 günün motor bazlı performans özetini gönderir (yönlü motorlar)."""
     since = datetime.utcnow() - timedelta(days=7)
     trades = repository.get_trades_since(since)
     closed_trades = [t for t in trades if t.status != TradeStatus.OPEN]
-    fpos = _funding_positions(since)
-    f_closed = [p for p in fpos if p.status == "closed"]
-    f_open = [p for p in fpos if p.status == "open"]
 
-    if not closed_trades and not fpos:
-        _send_raw("📊 <b>Haftalık Özet</b>\nBu hafta kapanan işlem veya açık fonlama pozisyonu olmadı.")
+    if not closed_trades:
+        _send_raw("📊 <b>Haftalık Özet (yönlü motorlar)</b>\nBu hafta kapanan işlem olmadı.")
         return
 
     lines = ["📊 <b>Haftalık Performans Özeti</b>\n"]
@@ -164,14 +142,7 @@ def send_weekly_summary():
             f"Kazanma oranı: %{win_rate:.0f} | PnL: {total_pnl:.2f}$"
         )
 
-    f_closed_pnl = sum(p.pnl_usd or 0 for p in f_closed)
-    if fpos:
-        lines.append(
-            f"💰 Fonlama: {len(f_closed)} kapanan (net {f_closed_pnl:+.2f}$) | {len(f_open)} açık "
-            f"(anlık net {sum(p.unrealized_pnl_usd or 0 for p in f_open):+.2f}$)"
-        )
-
-    total_pnl_all = sum(t.pnl_usd or 0 for t in closed_trades) + f_closed_pnl
+    total_pnl_all = sum(t.pnl_usd or 0 for t in closed_trades)
     virtual_balance = repository.get_virtual_balance()
     lines.append(f"\n<b>Haftanın realize K/Z: {total_pnl_all:.2f}$</b>")
     lines.append(f"<b>Güncel sanal kasa: {virtual_balance:.2f}$</b>")
@@ -182,43 +153,3 @@ def send_weekly_summary():
 def send_alert(text: str):
     """Acil durum uyarısı (örn. korumasız pozisyon)."""
     _send_raw(f"🚨 <b>UYARI</b>\n{text}")
-
-
-# ----------------------------------------------------------------------
-# FONLAMA STRATEJİSİ BİLDİRİMLERİ
-# ----------------------------------------------------------------------
-REASON_LABELS = {
-    "fonlama_dustu": "Fonlama oranı düştü",
-    "negatif_fonlama": "Fonlama negatife döndü",
-    "fiyat_koruma": "Fiyat çok oynadı (koruma)",
-}
-
-
-def _breakeven_days(apr: float) -> float:
-    from backend.funding.strategy import breakeven_days
-    return min(breakeven_days(apr), 9999)
-
-
-def send_funding_opened(pos, stats: dict):
-    mode = "📝 SANAL" if pos.mode == "paper" else "💵 GERÇEK"
-    text = (
-        f"💰 <b>Fonlama pozisyonu açıldı</b> ({mode})\n"
-        f"Parite: <b>{pos.symbol}</b>\n"
-        f"Spot AL + Vadeli SAT: {pos.notional_usd:.2f}$\n"
-        f"Son 3 gün ort. yıllık fonlama: %{stats['avg_apr'] * 100:.1f}\n"
-        f"Ödeme aralığı: {stats['interval_h']:.0f} saatte bir\n"
-        f"Bu oranla giriş-çıkış maliyeti ~{_breakeven_days(stats['avg_apr']):.0f} günde çıkar"
-    )
-    _send_raw(text)
-
-
-def send_funding_closed(pos, days: float, reason: str):
-    emoji = "✅" if (pos.pnl_usd or 0) > 0 else "🔻"
-    text = (
-        f"{emoji} <b>Fonlama pozisyonu kapandı</b>\n"
-        f"Parite: <b>{pos.symbol}</b> ({days:.1f} gün)\n"
-        f"Sebep: {REASON_LABELS.get(reason, reason)}\n"
-        f"Toplanan fonlama: {pos.funding_usd:+.4f}$ ({pos.funding_payments} ödeme)\n"
-        f"Net K/Z (komisyon dahil): <b>{pos.pnl_usd:+.4f}$</b>"
-    )
-    _send_raw(text)
