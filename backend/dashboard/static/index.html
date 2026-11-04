@@ -7,7 +7,7 @@
 <title>SMC Bot Paneli</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230E1726'/%3E%3Cpath d='M6 21l6-7 5 4 9-10' stroke='%23D9A441' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/fonts/fonts.css">
-<link rel="stylesheet" href="/static/style.css?v=4">
+<link rel="stylesheet" href="/static/style.css?v=5">
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -76,6 +76,7 @@
 
     <section data-panel="history" class="panel" hidden>
       <div class="row-head"><h2>Kapanan işlemler</h2><span id="histCount" class="muted"></span></div>
+      <label class="check small muted hist-toggle"><input type="checkbox" id="histCancelled"> İptal edilen kurulumları da göster</label>
       <div id="histList" class="hist-list"></div>
       <button id="histMore" class="btn ghost wide" hidden>Daha fazla göster</button>
     </section>
@@ -149,6 +150,6 @@
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="/static/app.js?v=3"></script>
+<script src="/static/app.js?v=4"></script>
 </body>
 </html>

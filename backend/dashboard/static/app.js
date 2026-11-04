@@ -277,7 +277,8 @@
   // ---------------- geçmiş ----------------
   async function loadHistory(reset) {
     if (reset) histOffset = 0;
-    const j = await api(`/api/trades?status=closed,cancelled&limit=50&offset=${histOffset}`).catch(() => null);
+    const st = $("#histCancelled").checked ? "closed,cancelled" : "closed";
+    const j = await api(`/api/trades?status=${st}&limit=50&offset=${histOffset}`).catch(() => null);
     if (!j) return;
     const el = $("#histList");
     const rows = j.trades.map(t => {
@@ -296,6 +297,7 @@
     $("#histCount").textContent = S ? `${S.stats.trades} kapanan işlem` : "";
   }
   $("#histMore").onclick = () => loadHistory(false);
+  $("#histCancelled").onchange = () => loadHistory(true);
 
   // ---------------- tarayıcı ----------------
   function renderScanner(s) {

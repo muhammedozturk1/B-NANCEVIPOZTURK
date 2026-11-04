@@ -128,3 +128,45 @@ def test_bot_trend_trade_paper_end_to_end(monkeypatch):
         await bot.md.rest.close()
 
     asyncio.run(scenario())
+
+
+def test_stale_breakout_after_restart_is_not_registered(monkeypatch):
+    """Bot yeniden başladığında son kapanmış 4s mum saatler önce kapanmış olabilir: geç girilmez, kayıt da açılmaz."""
+    monkeypatch.setattr(config, "OFFLINE_SIM", False)
+    from backend.smcbot import fng
+
+    async def scenario():
+        bot = Bot()
+        bot.md.symbols["TESTUSDT"] = SYM
+        bot.md.universe = ["TESTUSDT"]
+        bot.save_settings({"running": True, "risk_per_trade_pct": 1.0, "strategy": "trend"})
+
+        async def no_refresh(*a, **k):
+            return None
+
+        async def fake_fng(*a, **k):
+            return 50
+
+        closes = flat_then_breakout(True)
+        state = {"age": 2 * 3_600_000}
+
+        async def fake_candles(sym, iv, limit=300):
+            return candles(closes, t0=bot.now() - state["age"] - len(closes) * H4)
+
+        monkeypatch.setattr(bot.md, "refresh_universe", no_refresh)
+        monkeypatch.setattr(bot.md, "candles", fake_candles)
+        monkeypatch.setattr(fng, "latest", fake_fng)
+        bot.md.marks["TESTUSDT"] = (104.1, bot.now())
+
+        await bot.scan_trend()  # mum 2 saat önce kapanmış
+        assert db.list_trades("paper", None) == []
+        assert bot.candidates[0]["status"].startswith("Geç kalındı")
+
+        state["age"] = 60_000  # yeni mum 1 dk önce kapanmış (normal tarama)
+        closes.append(105.0)
+        await bot.scan_trend()
+        opened = db.list_trades("paper", ("open",))
+        assert len(opened) == 1 and opened[0]["symbol"] == "TESTUSDT"
+        await bot.md.rest.close()
+
+    asyncio.run(scenario())

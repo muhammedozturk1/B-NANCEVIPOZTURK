@@ -333,7 +333,15 @@ class Bot:
                     await self._trail_update(t, c4)
             for c in cands:
                 self._candidate_raw(c)
+            now = self.now()
             for sig in found:
+                late_min = (now - sig.setup_time) / 60_000
+                if late_min > 15:
+                    # bot yeniden başladığında son kapanmış mum eski olabilir: geç girilmez (test edilen kural:
+                    # kapanışın hemen ardından giriş). İşlem olarak kaydetme, sadece tarayıcıda göster.
+                    self._candidate(sig, f"Geç kalındı: mum {late_min:.0f} dk önce kapandı, girilmedi")
+                    self.seen_keys.add(sig.key)
+                    continue
                 await self._register_signal(sig)
         dt = time.time() - t0
         self.scan_info.update(last_scan=self.now(), duration=round(dt, 2), scanned=len(syms),
