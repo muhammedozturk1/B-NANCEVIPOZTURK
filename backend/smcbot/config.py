@@ -65,10 +65,17 @@ DEFAULT_SETTINGS: dict = {
     "max_consecutive_losses": 3,     # art arda bu kadar stop -> soğuma
     "cooldown_hours": 4,
     "max_drawdown_pct": 30.0,        # zirveden bu kadar düşüş -> bot tamamen durur
-    "min_stop_pct": 0.30,            # çok dar stoplar gürültüde patlar
-    "max_stop_pct": 4.00,            # 10x'te likidasyondan uzak kalmak için
+    "min_stop_pct": 0.30,            # çok dar stoplar gürültüde patlar (SMC)
+    "max_stop_pct": 4.00,            # SMC için üst sınır (trendde kaldıraç otomatik düşer)
 
-    # Strateji
+    # Strateji seçimi: trend (4s trend takibi, varsayılan) | smc (likidite avı + FVG, eski)
+    "strategy": "trend",
+    "trend_n": 20,                   # kırılım kanalı: önceki N adet 4s mum
+    "trend_stop_atr": 3.0,           # başlangıç stopu = K x ATR(14, 4s)
+    "trend_exit_n": 10,              # iz süren stop: son M adet 4s mumun dibi/tepesi
+    "fng_filter": True,              # aşırı açgözlülükte long, aşırı korkuda short açma
+
+    # SMC stratejisi
     "entry_mode": "ce",              # ce | edge | market
     "min_score": 65,
     "min_rr": 2.0,

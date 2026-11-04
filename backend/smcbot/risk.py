@@ -10,8 +10,18 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import math
+
 from . import db
 from .binance_client import SymbolInfo
+
+
+def safe_leverage(stop_frac: float, max_lev: int) -> int:
+    """Likidasyon stoptan önce gelmesin: kaldıraç, stop mesafesinin ~1,5 katı + bakım marjı payına göre sınırlanır.
+    Örnek: stop %4 -> 10x, %8 -> 7x, %14 -> 4x. Risk değişmez (miktar stop mesafesinden hesaplanır)."""
+    if stop_frac <= 0:
+        return max(1, int(max_lev))
+    return max(1, min(int(max_lev), math.floor(1 / (stop_frac * 1.5 + 0.01))))
 
 IST = ZoneInfo("Europe/Istanbul")
 
@@ -24,7 +34,7 @@ def size_position(balance: float, entry: float, stop: float, s: dict, sym: Symbo
     risk_amt = balance * s["risk_per_trade_pct"] / 100
     per_unit = abs(entry - stop) + entry * (2 * fee + slip)
     qty = risk_amt / per_unit
-    lev = max(1, int(s["leverage"]))
+    lev = safe_leverage(abs(entry - stop) / entry, int(s["leverage"]))
     max_notional = balance * lev * 0.95 / max(1, int(s["max_open_positions"]))
     capped = False
     if qty * entry > max_notional:

@@ -115,7 +115,7 @@ class LiveBroker:
         if any(p["symbol"] == symbol for p in await self.rest.positions()):
             raise BinanceError(0, None, "Bu coinde hesapta başka bir pozisyon var (SMC Scalper olabilir)")
         await self.rest.set_isolated(symbol)
-        await self.rest.set_leverage(symbol, int(s["leverage"]))
+        await self.rest.set_leverage(symbol, int(t.get("leverage") or s["leverage"]))
         side = "BUY" if t["side"] == "LONG" else "SELL"
         close_side = "SELL" if side == "BUY" else "BUY"
         res = await self.rest.market_order(symbol, side, sym.fmt_qty(qty), client_id=f"smc{t['id']}o")
@@ -127,8 +127,9 @@ class LiveBroker:
         try:
             sl = await self.rest.algo_close_order(symbol, close_side, "STOP_MARKET", sym.fmt_price(t["sl"]), f"smc{t['id']}sl")
             meta["sl_algo"] = sl.get("algoId")
-            tp = await self.rest.algo_close_order(symbol, close_side, "TAKE_PROFIT_MARKET", sym.fmt_price(t["tp2"]), f"smc{t['id']}tp")
-            meta["tp_algo"] = tp.get("algoId")
+            if t.get("tp2") is not None:  # trend takibinde hedef yok, sadece (iz süren) stop
+                tp = await self.rest.algo_close_order(symbol, close_side, "TAKE_PROFIT_MARKET", sym.fmt_price(t["tp2"]), f"smc{t['id']}tp")
+                meta["tp_algo"] = tp.get("algoId")
         except BinanceError as e:
             self.log("error", f"{symbol}: koruma emri konamadı ({e}). Pozisyon güvenlik için kapatılıyor.")
             await self._cancel_own(meta)
@@ -165,10 +166,12 @@ class LiveBroker:
         close_side = "SELL" if t["side"] == "LONG" else "BUY"
         meta = dict(t.get("meta") or {})
         old = meta.get("sl_algo")
-        new = await self.rest.algo_close_order(t["symbol"], close_side, "STOP_MARKET", sym.fmt_price(new_sl), f"smc{t['id']}be")
+        seq = int(meta.get("sl_seq", 0)) + 1  # her stop taşımada benzersiz emir kimliği
+        new = await self.rest.algo_close_order(t["symbol"], close_side, "STOP_MARKET", sym.fmt_price(new_sl), f"smc{t['id']}s{seq}")
         if old:
             await self.rest.cancel_algo(int(old))
         meta["sl_algo"] = new.get("algoId")
+        meta["sl_seq"] = seq
         return meta
 
     async def apply_funding(self, cost: float) -> None:

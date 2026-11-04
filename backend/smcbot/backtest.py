@@ -107,30 +107,47 @@ def simulate_symbol(symbol: str, ltf: Candles, htf: Candles, s: dict, start_ms: 
 
 
 def portfolio(trades: list[dict], s: dict, start_balance: float = 1000.0) -> dict:
-    trades = sorted(trades, key=lambda x: x["exit_time"])
+    """Olay sıralı portföy: işlemler GİRİŞ zamanına göre işlenir; botun canlı kuralları uygulanır
+    (en fazla N pozisyon, aynı yönde en fazla M, coin başına 1). Risk, giriş anındaki bakiyeden hesaplanır.
+    (Eski sürüm çıkış zamanına göre sıralıyordu; uzun süren kazananları dışarıda bırakıyordu.)"""
+    import heapq
+    max_pos = int(s["max_open_positions"])
+    max_dir = int(s.get("max_same_direction", max_pos))
     bal = start_balance
-    curve = []
-    open_until: list[int] = []
-    kept = []
-    for t in trades:
-        # eşzamanlı pozisyon sınırı (yaklaşık)
-        open_until = [x for x in open_until if x > t["entry_time"]]
-        if len(open_until) >= int(s["max_open_positions"]):
+    heap: list = []  # (exit_time, sıra, işlem)
+    kept: list[dict] = []
+    curve: list[dict] = []
+    seq = 0
+
+    def settle(until: int | None) -> None:
+        nonlocal bal
+        while heap and (until is None or heap[0][0] <= until):
+            _, _, t = heapq.heappop(heap)
+            bal += t["pnl"]
+            curve.append({"ts": t["exit_time"], "balance": bal, "equity": bal})
+
+    for t in sorted(trades, key=lambda x: x["entry_time"]):
+        settle(t["entry_time"])
+        live = [h[2] for h in heap]
+        if len(live) >= max_pos or any(x["symbol"] == t["symbol"] for x in live) or \
+                sum(1 for x in live if x["side"] == t["side"]) >= max_dir:
             continue
-        open_until.append(t["exit_time"])
         risk_amt = bal * s["risk_per_trade_pct"] / 100
-        pnl = risk_amt * t["r_multiple"]
-        bal += pnl
-        t = dict(t, pnl=pnl, fees=risk_amt * t.get("fee_r", 0.0), risk_amount=risk_amt, id=len(kept) + 1)
+        t = dict(t, pnl=risk_amt * t["r_multiple"], fees=risk_amt * t.get("fee_r", 0.0), risk_amount=risk_amt,
+                 id=len(kept) + 1)
         kept.append(t)
-        curve.append({"ts": t["exit_time"], "balance": bal, "equity": bal})
-    stats = compute_stats(kept, start_balance)
+        seq += 1
+        heapq.heappush(heap, (t["exit_time"], seq, t))
+    settle(None)
+    stats = compute_stats(sorted(kept, key=lambda x: x["exit_time"]), start_balance)
     stats["final_balance"] = bal
     stats["return_pct"] = (bal / start_balance - 1) * 100
     return {"trades": kept, "curve": curve, "stats": stats}
 
 
 async def run(md, s: dict, days: int, symbols: list[str], progress: Callable[[int, int, str], None]) -> dict:
+    if s.get("strategy") == "trend":
+        return await run_trend(md, s, days, symbols, progress)
     ltf_i, htf_i = s["ltf"], s["htf"]
     now = md.clock.now_ms()
     start = now - days * 86_400_000
@@ -158,5 +175,32 @@ async def run(md, s: dict, days: int, symbols: list[str], progress: Callable[[in
     res["errors"] = errors
     res["diag"] = diag
     res["params"] = {"days": days, "symbols": symbols, "min_score": s["backtest_min_score"],
-                     "risk_pct": s["risk_per_trade_pct"], "ltf": ltf_i, "htf": htf_i}
+                     "risk_pct": s["risk_per_trade_pct"], "ltf": ltf_i, "htf": htf_i, "strategy": "smc"}
+    return res
+
+
+async def run_trend(md, s: dict, days: int, symbols: list[str], progress: Callable[[int, int, str], None]) -> dict:
+    from . import fng, trend
+    now = md.clock.now_ms()
+    start = now - days * 86_400_000
+    warm = (int(s["trend_n"]) + 40) * INTERVAL_MS["4h"]
+    fng_hist = await fng.history(md.sim is not None) if s.get("fng_filter", True) else {}
+    all_trades: list[dict] = []
+    errors = []
+    for k, sym in enumerate(symbols):
+        progress(k, len(symbols), sym)
+        try:
+            raw = [x for x in await md.rest.klines_range(sym, "4h", start - warm, now) if int(x[6]) < now]
+            if len(raw) < int(s["trend_n"]) + 30:
+                continue
+            c4 = Candles.from_cols(parse_klines(raw), INTERVAL_MS["4h"])
+            all_trades += await asyncio.to_thread(trend.simulate, sym, c4, s, start, fng_hist)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{sym}: {e}")
+    progress(len(symbols), len(symbols), "")
+    res = portfolio(all_trades, s)
+    res["errors"] = errors
+    res["diag"] = {"signals": len(all_trades), "filled": len(all_trades)}
+    res["params"] = {"days": days, "symbols": symbols, "min_score": None, "risk_pct": s["risk_per_trade_pct"],
+                     "ltf": "4h", "htf": "4h", "strategy": "trend", "fng": bool(fng_hist)}
     return res

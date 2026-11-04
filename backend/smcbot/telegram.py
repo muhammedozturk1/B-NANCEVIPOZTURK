@@ -36,13 +36,21 @@ def _e(s: str) -> str:
 
 def msg_opened(t: dict, mode: str) -> str:
     icon = "🟢" if t["side"] == "LONG" else "🔴"
-    top = [r["text"] for r in (t.get("reasons") or []) if r.get("ok") and r.get("pts", 0) >= 10][:4]
+    trail = t.get("tp2") is None
+    if trail:
+        top = [r["text"] for r in (t.get("reasons") or []) if r.get("ok")][:2]
+    else:
+        top = [r["text"] for r in (t.get("reasons") or []) if r.get("ok") and r.get("pts", 0) >= 10][:4]
     lines = [
         f"{icon} <b>{t['side']} AÇILDI — {_e(t['symbol'])}</b>  <i>[SMC Bot · {MODE_TR.get(mode, mode)}]</i>",
         f"Giriş: <code>{fmt_price(t['entry_price'])}</code>  |  SL: <code>{fmt_price(t['sl'])}</code>",
-        f"TP1: <code>{fmt_price(t['tp1'])}</code>  |  TP2: <code>{fmt_price(t['tp2'])}</code>",
-        f"Risk: {t['risk_amount']:.2f} USDT  |  {t['leverage']}x  |  Skor {t['score']:.0f}/100",
     ]
+    if trail:
+        lines += ["Hedef yok: stop her 4 saatte iz sürer (trend takibi)",
+                  f"Risk: {t['risk_amount']:.2f} USDT  |  {t['leverage']}x"]
+    else:
+        lines += [f"TP1: <code>{fmt_price(t['tp1'])}</code>  |  TP2: <code>{fmt_price(t['tp2'])}</code>",
+                  f"Risk: {t['risk_amount']:.2f} USDT  |  {t['leverage']}x  |  Skor {(t.get('score') or 0):.0f}/100"]
     if top:
         lines.append("Neden:")
         lines += [f"• {_e(x)}" for x in top]
@@ -67,7 +75,7 @@ def msg_closed(t: dict, mode: str) -> str:
 
 def msg_setup(sig: dict, mode: str) -> str:
     return (f"🔎 <b>Kurulum bulundu — {_e(sig['symbol'])} {sig['side']}</b> [SMC Bot · {MODE_TR.get(mode, mode)}]\n"
-            f"Giriş bekleniyor: <code>{fmt_price(sig['entry'])}</code> (skor {sig['score']:.0f})")
+            f"Giriş: <code>{fmt_price(sig['entry'])}</code>" + (f" (skor {sig['score']:.0f})" if sig.get("score") is not None else ""))
 
 
 def msg_alert(title: str, body: str) -> str:

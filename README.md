@@ -1,6 +1,38 @@
-# Kripto Bot v4 — SMC Bot + SMC Scalper
+# Kripto Bot v4.1 — SMC Bot (4 saatlik trend takibi) + SMC Scalper
 
-## v4 — Yeni: SMC Bot (funding botunun yerine)
+## v4.1 — Strateji değişti: 4 saatlik trend takibi
+
+SMC (likidite avı + FVG) ve 15 dk destek/direnç + retest stratejileri gerçek veriyle test edildi ve **ikisi de
+masraflardan sonra zararlı** çıktı (40 coin, 2025–2026; destek/direnç için 72 filtre kombinasyonunun hepsi eksi:
+masrafsız ham avantaj ~+0,02R, komisyon+kayma işlem başı 0,06–0,36R). Bot artık varsayılan olarak
+**4 saatlik trend takibi** kullanır; SMC panelden seçilebilir olarak duruyor (Ayarlar > Strateji).
+
+**Kurallar** (`backend/smcbot/trend.py`):
+- 4s mum, önceki **20** mumun tepesinin üstünde kapanırsa **long**, dibinin altında kapanırsa **short**; kapanışın hemen ardından piyasa emri.
+- Başlangıç stopu **3 × ATR(14, 4s)**. Hedef yok: her 4s kapanışta stop son **10** mumun dibine/tepesine çekilir (sadece kâr yönünde).
+- Korku & Açgözlülük: aşırı açgözlülükte (≥75) long, aşırı korkuda (≤25) short açılmaz. Hacim bilgi olarak gösterilir (filtre olarak tutarsızdı).
+- Risk kuralları aynı (en fazla 3 pozisyon, aynı yönde 2, günlük limit, art arda stop soğuması, zirveden düşüş kilidi).
+- **Kaldıraç otomatik düşer:** 3×ATR stoplar genişse (medyan ~%8) 10x'te likidasyon stoptan önce gelirdi. Kaldıraç
+  `1 / (stop × 1,5 + %1)` ile sınırlanır (stop %4 → 10x, %8 → 7x, %14 → 4x). Risk değişmez; miktar stop mesafesinden hesaplanır.
+
+**Test** (40 vadeli coin, %1 risk, botun canlı kurallarıyla; komisyon + kayma dahil). Ayarlar 2025–26 ile seçildi,
+2023–24 hiç bakılmadan doğrulandı. Aynı 4s kapanışta çok coin birden kırıldığında hangi 3'ünün seçildiği sonucu
+değiştirdiği için seçim 300 kez rastgele yapıldı:
+
+| Yıl | Medyan getiri | En kötü %10 | Zararla biten senaryo | Tipik en derin düşüş |
+|---|---|---|---|---|
+| 2023 | +%5 | −%5 | %23 | %18 |
+| 2024 | +%20 | +%12 | %0 | %8 |
+| 2025 | +%30 | +%23 | %0 | %10 |
+| 2026 (Oca–Eki) | +%22 | +%6 | %3 | %11 |
+
+8.868 sinyal: ortalama +0,085R, kazanma oranı **%37**, medyan işlem −0,23R. Kazancın çoğu az sayıdaki büyük trendden
+gelir; **uzun kayıp serileri normaldir**. Bu yüzden işlem başı risk **%1–2** olmalı (%5'te art arda 10 stop kasanın ~%40'ı).
+Uyarılar: coin listesi bugünün popüler coinleri (2023–24 sonuçlarını iyimser gösterebilir); geçmiş sonuç geleceği garanti etmez.
+
+---
+
+# v4 — SMC Bot kurulumu (hâlâ geçerli)
 
 Fonlama (funding) botu ve paneli **kaldırıldı**. Yerine **SMC Bot** geldi; paneli artık ana sayfa (`/`).
 **SMC Scalper** (`backend/smc`, panel `/smc/`) ve kapalı scalp/day/swing motorları olduğu gibi duruyor.
@@ -10,7 +42,7 @@ Fonlama (funding) botu ve paneli **kaldırıldı**. Yerine **SMC Bot** geldi; pa
 | `crypto-bot-dashboard` (web) | **SMC Bot** motoru + tüm paneller | `/` SMC Bot · `/smc/` SMC Scalper |
 | `crypto-bot-engine` (worker) | SMC Scalper (+ kapalı yönlü motorlar) | — |
 
-### SMC Bot ne yapar?
+### SMC stratejisi (eski, panelden seçilebilir)
 En hacimli 30 vadeli coini her 15 dk mum kapanışında tarar: likidite avı → MSS → FVG (SMC/ICT) yapısını
 order flow verisiyle (CVD, Binance likidasyon akışı, tahmini likidasyon haritası, OI, funding, emir defteri) puanlar.
 10x kaldıraçla long/short açar, 1R'de yarısını kapatıp stopu girişe çeker, hedefi bir sonraki likidite seviyesidir.
@@ -23,7 +55,7 @@ Telegram'a `[SMC Bot · DEMO]` etiketiyle bildirim gider (SMC Scalper'ınkiler `
   zirveden %30 düşüşte otomatik durma, en fazla 3 pozisyon. İşlem başı risk varsayılanı **%5** (panelden değişir; %1–2 önerilir).
 - **İlk açılışta bot DURAKLATILMIŞTIR:** panelde **Başlat**'a basınca demo modda işlem aramaya başlar.
 
-### Dürüst sonuç (gerçek Binance verisiyle geçmiş test)
+### SMC stratejisinin test sonucu
 Mayıs–Ekim 2026, en hacimli 15 coin, 15 dk, komisyon + kayma dahil, işlem başı %1 risk:
 170 işlem, ortalama **−0,10R**, profit factor **0,79**. Mayıs–Temmuz −0,29R, Ağustos–Ekim +0,10R.
 Yani tutarlı bir avantaj henüz görünmüyor; %5 riskle aynı dönem kasayı −%65'e götürdü.

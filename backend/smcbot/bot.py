@@ -9,7 +9,7 @@ import traceback
 import uuid
 from collections import deque
 
-from . import backtest, coinglass, config, db, telegram
+from . import backtest, coinglass, config, db, fng, telegram, trend
 from .binance_client import BinanceError, BinanceREST
 from .brokers import LiveBroker, PaperBroker
 from .config import INTERVAL_MS
@@ -52,6 +52,7 @@ class Bot:
         self.iid = f"{os.environ.get('RENDER_INSTANCE_ID') or socket.gethostname()}:{uuid.uuid4().hex[:8]}"
         self.is_leader = False
         self._bg: set[asyncio.Task] = set()
+        self.fng_value: int | None = None
 
     # ------------------------------------------------------------------ yardımcılar
     @property
@@ -233,7 +234,7 @@ class Bot:
             self.scan_info["status"] = "Yedekte (bot diğer kopyada çalışıyor)"
             return
         s = self.settings
-        ims = INTERVAL_MS[s["ltf"]]
+        ims = INTERVAL_MS[self.scan_tf()]
         now = self.now()
         bucket = now // ims
         self.scan_info["next_scan"] = (bucket + 1) * ims + (0 if self.sim else 3000)
@@ -250,7 +251,13 @@ class Bot:
         self._last_bucket = bucket
         await self.scan()
 
+    def scan_tf(self) -> str:
+        return "4h" if self.settings.get("strategy") == "trend" else self.settings["ltf"]
+
     async def scan(self) -> None:
+        if self.settings.get("strategy") == "trend":
+            await self.scan_trend()
+            return
         s = self.settings
         t0 = time.time()
         self.scan_info["status"] = "Taranıyor…"
@@ -293,7 +300,81 @@ class Bot:
         if found or near_list:
             self.log("info", f"Tarama: {len(syms)} coin, {len(found)} sinyal, {len(near_list)} yakın aday ({dt:.1f} sn)")
 
+    async def scan_trend(self) -> None:
+        """4s trend takibi: kapanan her 4s mumda kırılımları ara ve açık işlemlerin iz süren stoplarını güncelle."""
+        s = self.settings
+        t0 = time.time()
+        self.scan_info["status"] = "Taranıyor…"
+        await self.md.refresh_universe(int(s["universe_size"]))
+        syms = list(self.md.universe)
+        self.fng_value = await fng.latest(self.sim)
+        sem = asyncio.Semaphore(6)
+        found: list = []
+        cands: list[dict] = []
+        c4cache: dict = {}
+
+        async def one(sym: str) -> None:
+            async with sem:
+                c4 = await self.md.candles(sym, "4h", 120)
+                if c4 is None:
+                    return
+                c4cache[sym] = c4
+                sigs, cs = trend.evaluate(sym, c4, s, self.fng_value)
+                found.extend(sigs)
+                cands.extend(cs)
+
+        await asyncio.gather(*(one(x) for x in syms))
+        async with self.lock:
+            for t in self.open_trades():
+                if (t.get("meta") or {}).get("exit_mode") != "trail":
+                    continue
+                c4 = c4cache.get(t["symbol"]) or await self.md.candles(t["symbol"], "4h", 120)
+                if c4 is not None:
+                    await self._trail_update(t, c4)
+            for c in cands:
+                self._candidate_raw(c)
+            for sig in found:
+                await self._register_signal(sig)
+        dt = time.time() - t0
+        self.scan_info.update(last_scan=self.now(), duration=round(dt, 2), scanned=len(syms),
+                              signals=len(found), status="Bekliyor (sonraki 4 saatlik mum kapanışı)")
+        self.log("info", f"4s tarama: {len(syms)} coin, {len(found)} kırılım, korku endeksi "
+                         f"{self.fng_value if self.fng_value is not None else '—'} ({dt:.1f} sn)")
+
+    async def _trail_update(self, t: dict, c4) -> None:
+        new = trend.new_trail_stop(t, c4, int(self.settings["trend_exit_n"]))
+        if new is None:
+            return
+        sym = self.md.symbols.get(t["symbol"])
+        if sym:
+            new = sym.round_price(new)
+            if new == t["sl"]:
+                return
+        meta = dict(t.get("meta") or {})
+        if isinstance(self.broker, LiveBroker):
+            try:
+                meta.update(await self.broker.move_stop(dict(t, meta=meta), new, sym))
+            except BinanceError as e:
+                self.log("error", f"#{t['id']} iz süren stop taşınamadı: {e} (eski stop yerinde)")
+                return
+        meta["trail"] = (meta.get("trail") or [])[-59:] + [[self.now(), new]]
+        db.update_trade(t["id"], sl=new, meta=meta)
+        self.log("info", f"#{t['id']} {t['symbol']} {t['side']} iz süren stop: {fmt_price(t['sl'])} → {fmt_price(new)}")
+
+    def _candidate_raw(self, c: dict) -> None:
+        self.candidates.appendleft({
+            "time": self.now(), "symbol": c["symbol"], "side": c["side"], "score": None, "structure": None,
+            "flow": None, "entry": c.get("close"), "stop": None, "tp2": None, "rr": None, "status": c["status"],
+            "reasons": c.get("reasons") or [f"Kırılım seviyesi {fmt_price(c['level'])}, son kapanış {fmt_price(c['close'])}"],
+        })
+
     def _candidate(self, sig, status: str) -> None:
+        if (sig.annotations or {}).get("strategy") == "trend":
+            self.candidates.appendleft({
+                "time": self.now(), "symbol": sig.symbol, "side": sig.side, "score": None, "structure": None,
+                "flow": None, "entry": sig.entry, "stop": sig.stop, "tp2": None, "rr": None, "status": status,
+                "reasons": [r["text"] for r in sig.reasons][:4]})
+            return
         self.candidates.appendleft({
             "time": self.now(), "symbol": sig.symbol, "side": sig.side, "score": sig.score,
             "structure": sig.structure_score, "flow": sig.flow_score, "entry": sig.entry, "stop": sig.stop,
@@ -320,17 +401,26 @@ class Bot:
             self._candidate(sig, f"Risk engeli: {why}")
             return
         ann = dict(sig.annotations)
-        ann["tf"] = s["ltf"]
+        if not ann.get("tf"):
+            ann["tf"] = s["ltf"]
+        is_trend = ann.get("strategy") == "trend"
         tid = db.insert_trade({
             "mode": self.mode, "symbol": sig.symbol, "side": sig.side, "status": "pending", "score": sig.score,
             "setup_time": sig.setup_time, "entry_price": sig.entry, "sl": sig.stop, "sl_initial": sig.stop,
             "tp1": sig.tp1, "tp2": sig.tp2, "leverage": int(s["leverage"]), "reasons": sig.reasons,
             "annotations": ann, "meta": {"key": sig.key, "expiry_time": sig.expiry_time, "rr": sig.rr,
                                          "stop_pct": sig.stop_pct, "structure_score": sig.structure_score,
-                                         "flow_score": sig.flow_score, "planned_entry": sig.entry}})
-        self._candidate(sig, f"Giriş bekleniyor (#{tid})")
-        self.log("info", f"#{tid} {sig.symbol} {sig.side} kurulumu: giriş {fmt_price(sig.entry)}, stop {fmt_price(sig.stop)}, "
-                         f"hedef {fmt_price(sig.tp2)} (RR {sig.rr}, skor {sig.score:.0f})")
+                                         "flow_score": sig.flow_score, "planned_entry": sig.entry,
+                                         **({"exit_mode": "trail", "market": True} if is_trend else {})}})
+        if is_trend:
+            self._candidate(sig, f"Kırılım: piyasa emriyle giriliyor (#{tid})")
+            self.log("info", f"#{tid} {sig.symbol} {sig.side} 4s kırılım: kapanış {fmt_price(sig.entry)}, "
+                             f"stop {fmt_price(sig.stop)} (%{sig.stop_pct:.1f}), hedef yok (iz süren stop)")
+            await self._process_pending()  # beklemeden hemen gir (fiyat yoksa sonraki tikte)
+        else:
+            self._candidate(sig, f"Giriş bekleniyor (#{tid})")
+            self.log("info", f"#{tid} {sig.symbol} {sig.side} kurulumu: giriş {fmt_price(sig.entry)}, stop {fmt_price(sig.stop)}, "
+                             f"hedef {fmt_price(sig.tp2)} (RR {sig.rr}, skor {sig.score:.0f})")
         if s["notify_setups"]:
             self.notify(telegram.msg_setup(sig.to_dict(), self.mode))
 
@@ -354,6 +444,14 @@ class Bot:
                 continue
             L = t["side"] == "LONG"
             meta = t.get("meta") or {}
+            if meta.get("market"):  # trend kırılımı: kapanışın hemen ardından piyasa emri
+                if now >= int(meta.get("expiry_time", now + 1)):
+                    self._cancel(t, "Süre doldu: giriş yapılamadı")
+                elif (mark <= t["sl"]) if L else (mark >= t["sl"]):
+                    self._cancel(t, "Fiyat girişten önce stop seviyesini geçti (kırılım başarısız)")
+                else:
+                    await self._open(t, mark)
+                continue
             if now >= int(meta.get("expiry_time", now + 1)):
                 self._cancel(t, "Süre doldu: fiyat giriş seviyesine gelmedi")
             elif (mark <= t["sl"]) if L else (mark >= t["sl"]):
@@ -384,6 +482,7 @@ class Bot:
         if not sz:
             self._cancel(t, "Pozisyon büyüklüğü borsa minimumunun altında")
             return
+        t["leverage"] = sz["leverage"]
         try:
             fill = await self.broker.open(t, sz["qty"], mark, sym)
         except BinanceError as e:
@@ -419,6 +518,12 @@ class Bot:
             r_now = (mark - t["entry_price"]) * d / ru
             if r_now > (t.get("mfe") or 0) + 0.02 or -r_now > (t.get("mae") or 0) + 0.02:
                 db.update_trade(t["id"], mfe=max(t.get("mfe") or 0, r_now), mae=max(t.get("mae") or 0, -r_now))
+            if (t.get("meta") or {}).get("exit_mode") == "trail":
+                # trend: hedef yok, sadece (iz süren) stop. Gerçek/testnette stop borsada bekler.
+                if paper and ((mark <= t["sl"]) if L else (mark >= t["sl"])):
+                    profit = (t["sl"] - t["entry_price"]) * d > 0
+                    await self._close(t, mark, "sl", "İz süren stop (kârda)" if profit else "Stop")
+                continue
             hit_tp1 = not t["tp1_hit"] and ((mark >= t["tp1"]) if L else (mark <= t["tp1"]))
             if paper:
                 if (mark <= t["sl"]) if L else (mark >= t["sl"]):
@@ -521,7 +626,9 @@ class Bot:
                     t = c["trade"]
                     px = c["price"]
                     d = _dir(t["side"])
-                    if abs(px - t["sl"]) <= abs(px - t["tp2"]):
+                    if t.get("tp2") is None:
+                        reason = "İz süren stop (borsa)" if (px - t["entry_price"]) * d > 0 else "Stop (borsa)"
+                    elif abs(px - t["sl"]) <= abs(px - t["tp2"]):
                         reason = "Başabaş stop (TP1 sonrası)" if t["tp1_hit"] else "Stop (borsa)"
                     else:
                         reason = "TP2 hedef (borsa)"
@@ -673,7 +780,7 @@ class Bot:
         self._require_leader()
         if self.backtest_state["running"]:
             raise ValueError("Geçmiş test zaten çalışıyor")
-        days = max(3, min(90, int(days)))
+        days = max(3, min(365 if self.settings.get("strategy") == "trend" else 90, int(days)))
         n_symbols = max(1, min(40, int(n_symbols)))
         syms = list(self.md.universe)[:n_symbols]
         if not syms:
@@ -723,7 +830,7 @@ class Bot:
         day_pnl = self.guard.daily_pnl(self.now())
         return {
             "mode": self.mode, "mode_tr": MODE_TR[self.mode], "running": s["running"], "sim": self.sim,
-            "leader": self.is_leader,
+            "leader": self.is_leader, "strategy": s.get("strategy", "smc"), "fng": self.fng_value,
             "server_time": self.now(), "balance": bal, "equity": eq, "upnl": upnl,
             "day_pnl": day_pnl, "day_limit": -dsb * s["daily_loss_limit_pct"] / 100,
             "start_balance": float(s["paper_start_balance"]) if self.mode == "paper" else None,
@@ -731,7 +838,8 @@ class Bot:
             "risk": {"halted": g["halted"], "halt_reason": g["halt_reason"], "cooldown_until": g["cooldown_until"],
                      "peak_equity": g["peak_equity"],
                      "drawdown_pct": ((g["peak_equity"] - eq) / g["peak_equity"] * 100) if g["peak_equity"] else 0.0},
-            "scan": {**self.scan_info, "universe": len(self.md.universe), "ltf": s["ltf"], "htf": s["htf"]},
+            "scan": {**self.scan_info, "universe": len(self.md.universe), "ltf": self.scan_tf(),
+                     "htf": "4h" if s.get("strategy") == "trend" else s["htf"]},
             "candidates": list(self.candidates)[:40],
             "health": {"ws": self.md.ws_ok(), "geo_blocked": self.md.geo_blocked, "data_error": self.md.last_error,
                        "live_error": self.live_error, "telegram": telegram.configured(), "coinglass": coinglass.status(),

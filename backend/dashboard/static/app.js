@@ -24,6 +24,7 @@
   const pct = (v, d = 1) => v == null || isNaN(v) ? "—" : "%" + (d === 1 ? nf1 : nf2).format(v);
   const rr = v => v == null || isNaN(v) ? "—" : (v > 0 ? "+" : "") + nf2.format(v) + "R";
   const cls = v => v > 0 ? "up" : v < 0 ? "down" : "";
+  const sc = v => v == null || isNaN(v) ? "—" : nf0.format(v);
   const qty = v => v == null || isNaN(v) ? "—" : new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 6 }).format(+(+v).toPrecision(10));
   function price(v) {
     if (v == null || isNaN(v)) return "—";
@@ -121,7 +122,7 @@
     if (t === "history") loadHistory(true);
     if (t === "logs") loadLogs();
     if (t === "settings") loadSettings();
-    if (t === "backtest") loadBacktest();
+    if (t === "backtest") { loadBacktest(); if (S) renderBtNote(S); }
     if (t === "stats" && S) renderStats(S.stats);
   }
 
@@ -157,7 +158,7 @@
     renderPending(s);
     if (tab === "scanner") renderScanner(s);
     if (tab === "stats") renderStats(s.stats);
-    if (tab === "backtest") renderBtProgress(s.backtest);
+    if (tab === "backtest") { renderBtProgress(s.backtest); renderBtNote(s); }
     if (tab === "settings" && settingsLoaded) renderModeBox(s);
   }
 
@@ -199,19 +200,26 @@
   // ---------------- pozisyonlar ----------------
   function track(t, mark) {
     const L = t.side === "LONG";
+    const trail = t.tp2 == null;
+    if (trail) {  // hedef yok: sağ uç = max(2R, anlık fiyat)
+      const r = Math.abs(t.entry_price - t.sl_initial) || 1;
+      const far = L ? Math.max(t.entry_price + 2 * r, mark ?? -Infinity) : Math.min(t.entry_price - 2 * r, mark ?? Infinity);
+      t = { ...t, tp2: far, tp1: t.entry_price + (L ? r : -r) };
+    }
     const lo = L ? t.sl_initial : t.tp2, hi = L ? t.tp2 : t.sl_initial;
     const span = hi - lo || 1;
     const p = v => Math.max(0, Math.min(100, ((v - lo) / span) * 100));
     const e = p(t.entry_price), tp1 = p(t.tp1), m = mark != null ? p(mark) : e;
     const sl = p(t.sl);
-    const leftLbl = L ? "Stop" : "TP2", rightLbl = L ? "TP2" : "Stop";
+    const tgt = trail ? "Hedef yok" : "TP2";
+    const leftLbl = L ? "Stop" : tgt, rightLbl = L ? tgt : "Stop";
     return `<div class="track" style="--e:${e}%">
       <div class="rail"></div>
       <span class="lbl l0" style="left:0">${leftLbl}</span><span class="lbl l1" style="left:100%">${rightLbl}</span>
       <span class="lbl" style="left:${e}%">Giriş</span>
       <div class="tick entry" style="left:${e}%"></div>
-      <div class="tick ${t.tp1_hit ? "hit" : ""}" style="left:${tp1}%" title="TP1"></div>
-      ${t.sl !== t.sl_initial ? `<div class="tick" style="left:${sl}%" title="Güncel stop"></div>` : ""}
+      <div class="tick ${t.tp1_hit ? "hit" : ""}" style="left:${tp1}%" title="${trail ? "1R" : "TP1"}"></div>
+      ${t.sl !== t.sl_initial ? `<div class="tick" style="left:${sl}%" title="${trail ? "İz süren stop" : "Güncel stop"}"></div>` : ""}
       <div class="dot" style="left:${m}%"></div></div>`;
   }
   function renderPositions(s) {
@@ -230,13 +238,13 @@
           <div><span>Giriş</span><b>${price(t.entry_price)}</b></div>
           <div><span>Anlık</span><b>${price(t.mark)}</b></div>
           <div><span>Stop</span><b>${price(t.sl)}</b></div>
-          <div><span>Hedef</span><b>${price(t.tp2)}</b></div>
+          <div><span>Hedef</span><b>${t.tp2 == null ? "İz süren" : price(t.tp2)}</b></div>
           <div><span>Miktar</span><b>${qty(t.qty_open)}</b></div>
           <div><span>Teminat</span><b>${money(t.margin)}</b></div>
           <div><span>Risk</span><b>${money(t.risk_amount)}</b></div>
-          <div><span>Skor</span><b>${nf0.format(t.score)}</b></div>
+          <div><span>${t.tp2 == null ? "İlk stop" : "Skor"}</span><b>${t.tp2 == null ? price(t.sl_initial) : sc(t.score)}</b></div>
         </div>
-        <div class="pos-foot"><span class="muted small">${t.tp1_hit ? "TP1 alındı, stop girişte" : "Açılış " + fmtTime(t.entry_time)}</span>
+        <div class="pos-foot"><span class="muted small">${t.tp2 == null ? (t.sl !== t.sl_initial ? "Stop iz sürüyor" : "Açılış " + fmtTime(t.entry_time)) : t.tp1_hit ? "TP1 alındı, stop girişte" : "Açılış " + fmtTime(t.entry_time)}</span>
           <button class="btn small danger" data-close-trade="${t.id}">Pozisyonu kapat</button></div>
       </article>`).join("");
   }
@@ -245,7 +253,7 @@
     if (!s.pending.length) { el.innerHTML = `<p class="empty">Bekleyen kurulum yok.</p>`; return; }
     el.innerHTML = s.pending.map(t => `
       <div class="line" data-trade="${t.id}">
-        <div class="who"><span class="sym">${esc(t.symbol)}</span><span class="side ${t.side}">${t.side}</span><span class="score ${t.score >= 75 ? "hi" : ""}">${nf0.format(t.score)}</span></div>
+        <div class="who"><span class="sym">${esc(t.symbol)}</span><span class="side ${t.side}">${t.side}</span>${t.score == null ? "" : `<span class="score ${t.score >= 75 ? "hi" : ""}">${sc(t.score)}</span>`}</div>
         <div class="meta">Giriş ${price(t.entry_price)} · anlık ${price(t.mark)}<br>Son geçerlilik ${fmtTime(t.expiry_time)}</div>
         <div class="res"><button class="btn small" data-close-trade="${t.id}" data-pending="1">İptal et</button></div>
       </div>`).join("");
@@ -291,21 +299,23 @@
 
   // ---------------- tarayıcı ----------------
   function renderScanner(s) {
-    const sc = s.scan;
+    const scn = s.scan;
     $("#scanInfo").innerHTML = `
-      <div><span>Durum</span><b>${esc(sc.status)}</b></div>
-      <div><span>Son tarama</span><b>${sc.last_scan ? fmtClock(sc.last_scan) : "—"}</b></div>
-      <div><span>Sonraki</span><b>${sc.next_scan ? fmtClock(sc.next_scan) : "—"}</b></div>
-      <div><span>Taranan coin</span><b>${sc.scanned || sc.universe}</b></div>
-      <div><span>Zaman dilimi</span><b>${sc.ltf} giriş / ${sc.htf} trend</b></div>
-      <div><span>Süre</span><b>${sc.duration ? nf2.format(sc.duration) + " sn" : "—"}</b></div>`;
+      <div><span>Durum</span><b>${esc(scn.status)}</b></div>
+      <div><span>Son tarama</span><b>${scn.last_scan ? fmtClock(scn.last_scan) : "—"}</b></div>
+      <div><span>Sonraki</span><b>${scn.next_scan ? fmtClock(scn.next_scan) : "—"}</b></div>
+      <div><span>Taranan coin</span><b>${scn.scanned || scn.universe}</b></div>
+      <div><span>Strateji</span><b>${s.strategy === "trend" ? "4s trend takibi" : "SMC"}</b></div>
+      <div><span>Zaman dilimi</span><b>${s.strategy === "trend" ? "4 saat" : scn.ltf + " giriş / " + scn.htf + " trend"}</b></div>
+      <div><span>Korku endeksi</span><b>${s.fng == null ? "—" : s.fng}</b></div>
+      <div><span>Süre</span><b>${scn.duration ? nf2.format(scn.duration) + " sn" : "—"}</b></div>`;
     const el = $("#candList");
-    if (!s.candidates.length) { el.innerHTML = `<p class="empty">Henüz aday yok. İlk tarama mum kapanışında yapılır.</p>`; return; }
+    if (!s.candidates.length) { el.innerHTML = `<p class="empty">Henüz aday yok. İlk tarama ${s.strategy === "trend" ? "bir sonraki 4 saatlik" : ""} mum kapanışında yapılır.</p>`; return; }
     el.innerHTML = s.candidates.map(c => `
       <div class="cand">
         <div class="cand-top"><span class="sym">${esc(c.symbol)}</span><span class="side ${c.side}">${c.side}</span>
-          <span class="score ${c.score >= 75 ? "hi" : ""}" title="Yapı ${c.structure} + akış ${c.flow}">${nf0.format(c.score)}</span>
-          <span class="muted small">${fmtClock(c.time)} · RR ${nf1.format(c.rr)}</span>
+          ${c.score == null ? "" : `<span class="score ${c.score >= 75 ? "hi" : ""}" title="Yapı ${c.structure} + akış ${c.flow}">${sc(c.score)}</span>`}
+          <span class="muted small">${fmtClock(c.time)}${c.rr ? " · RR " + nf1.format(c.rr) : ""}</span>
           <span class="cand-status">${esc(c.status)}</span></div>
         <ul>${c.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>
       </div>`).join("");
@@ -384,7 +394,8 @@
     const ann = t.annotations || {};
     const tf = ann.tf || (S && S.scan.ltf) || "15m";
     const ims = { "1m": 6e4, "5m": 3e5, "15m": 9e5, "30m": 18e5, "1h": 36e5, "4h": 144e5 }[tf] || 9e5;
-    const t0 = Math.min(ann.pool?.time || Infinity, ann.sweep?.time || Infinity, t.setup_time || Infinity, t.entry_time || Infinity);
+    const t0 = Math.min(ann.pool?.time || Infinity, ann.sweep?.time || Infinity, ann.breakout?.from_time || Infinity,
+                        t.setup_time || Infinity, t.entry_time || Infinity);
     const startMs = (isFinite(t0) ? t0 : Date.now()) - 40 * ims;
     const endMs = (t.exit_time ? t.exit_time + 25 * ims : (S ? S.server_time : Date.now()));
     renderTradeBody(t, live);
@@ -417,17 +428,22 @@
     if (ann.zone) { line(ann.zone.top, "rgba(111,163,224,.9)", ann.zone.type, 2, 1, false); line(ann.zone.bottom, "rgba(111,163,224,.9)", "", 2, 1, false); legend.push(["#6FA3E0", `${ann.zone.type} bölgesi`]); }
     if (ann.pool) { line(ann.pool.price, "#8C9AB3", ann.pool.label, 1, 1, false); legend.push(["#8C9AB3", `Süpürülen likidite (${ann.pool.label})`]); }
     if (ann.mss) { line(ann.mss.price, "rgba(230,236,245,.55)", "MSS", 3, 1, false); legend.push(["#E6ECF5", "MSS seviyesi"]); }
+    const trail = ann.strategy === "trend";
+    if (ann.breakout) { line(ann.breakout.price, "#6FA3E0", "Kırılım", 2, 1, false); legend.push(["#6FA3E0", "Kırılan kanal seviyesi"]); }
     line(t.entry_price, "#D9A441", "Giriş", 0, 2); legend.push(["#D9A441", "Giriş"]);
-    line(t.sl_initial || t.sl, "#F0606A", "Stop", 0, 2); legend.push(["#F0606A", "Stop"]);
-    if (t.sl && t.sl_initial && t.sl !== t.sl_initial) line(t.sl, "#F0606A", "Başabaş stop", 2, 1, false);
-    line(t.tp1, "rgba(61,203,154,.8)", "TP1", 2);
-    line(t.tp2, "#3DCB9A", "TP2", 0, 2); legend.push(["#3DCB9A", "TP1 / TP2"]);
+    line(t.sl_initial || t.sl, "#F0606A", trail ? "İlk stop" : "Stop", 0, 2); legend.push(["#F0606A", trail ? "İlk stop (3×ATR)" : "Stop"]);
+    if (t.sl && t.sl_initial && t.sl !== t.sl_initial) {
+      line(t.sl, "#F0606A", trail ? "İz süren stop" : "Başabaş stop", 2, 1, !!trail);
+      if (trail) legend.push(["#F5A3A8", "Güncel iz süren stop"]);
+    }
+    if (!trail) { line(t.tp1, "rgba(61,203,154,.8)", "TP1", 2); line(t.tp2, "#3DCB9A", "TP2", 0, 2); legend.push(["#3DCB9A", "TP1 / TP2"]); }
     (ann.liq_clusters || []).slice().sort((a, b) => b.w - a.w).slice(0, 3).forEach(c => line(c.price, "rgba(176,132,255,.45)", "", 1, 1, false));
     if ((ann.liq_clusters || []).length) legend.push(["#B084FF", "Tahmini likidasyon kümeleri"]);
     const mk = [];
     const add = (ms, pos, color, shape, text) => { const tm = nearestBar(candles, ms); if (tm) mk.push({ time: tm, position: pos, color, shape, text }); };
     if (ann.sweep) add(ann.sweep.time, L ? "belowBar" : "aboveBar", "#D9A441", "circle", "Likidite avı");
     if (ann.mss) add(ann.mss.time, L ? "belowBar" : "aboveBar", "#E6ECF5", "square", "MSS");
+    if (ann.breakout) add(ann.breakout.time, L ? "aboveBar" : "belowBar", "#6FA3E0", "square", "Kırılım");
     if (t.entry_time) add(t.entry_time, L ? "belowBar" : "aboveBar", "#D9A441", L ? "arrowUp" : "arrowDown", "Giriş");
     (t.meta?.partials || []).forEach(p => add(p.time, L ? "aboveBar" : "belowBar", "#3DCB9A", "circle", "TP1"));
     if (t.exit_time && t.status === "closed") add(t.exit_time, L ? "aboveBar" : "belowBar", (t.r_multiple || 0) >= 0 ? "#3DCB9A" : "#F0606A", L ? "arrowDown" : "arrowUp", "Çıkış " + rr(t.r_multiple));
@@ -444,22 +460,22 @@
     if (t.status === "closed") {
       const win = (t.pnl ?? t.r_multiple) > 0;
       outcome = `<div class="outcome ${win ? "win" : "loss"}"><b>${t.pnl != null ? money(t.pnl, true) + " USDT · " : ""}${rr(t.r_multiple)}</b><br>
-        <span class="muted">Çıkış nedeni: ${esc(t.exit_reason || "—")}. ${t.tp1_hit ? "TP1'de kısmi kâr alınmış, stop girişe çekilmişti." : "TP1'e ulaşılmadı."}
+        <span class="muted">Çıkış nedeni: ${esc(t.exit_reason || "—")}. ${t.tp2 == null ? "Trend takibi: hedef yoktu, çıkışı iz süren stop belirledi." : t.tp1_hit ? "TP1'de kısmi kâr alınmış, stop girişe çekilmişti." : "TP1'e ulaşılmadı."}
         İşlem boyunca en iyi ${rr(t.mfe)}, en kötü ${rr(-(t.mae || 0))} görüldü.</span></div>`;
     } else if (t.status === "cancelled") {
       outcome = `<div class="outcome"><b>Kurulum iptal edildi</b><br><span class="muted">${esc(t.exit_reason || "")}</span></div>`;
     } else if (t.status === "open") {
-      outcome = `<div class="outcome"><b>Pozisyon açık</b><br><span class="muted">Anlık fiyat ${price(t.mark)}. Stop ${price(t.sl)}, hedef ${price(t.tp2)}.</span></div>`;
+      outcome = `<div class="outcome"><b>Pozisyon açık</b><br><span class="muted">Anlık fiyat ${price(t.mark)}. Stop ${price(t.sl)}${t.tp2 == null ? ", hedef yok (stop her 4 saatte iz sürer)" : ", hedef " + price(t.tp2)}.</span></div>`;
     } else {
-      outcome = `<div class="outcome"><b>Giriş bekleniyor</b><br><span class="muted">Fiyat ${price(t.entry_price)} seviyesine gelirse pozisyon açılacak.</span></div>`;
+      outcome = `<div class="outcome"><b>Giriş bekleniyor</b><br><span class="muted">${t.tp2 == null ? "Kırılım onaylandı, piyasa emriyle giriliyor." : "Fiyat " + price(t.entry_price) + " seviyesine gelirse pozisyon açılacak."}</span></div>`;
     }
     $("#sheetBody").innerHTML = `
       ${outcome}
       <div class="pos-grid">
-        <div><span>Skor</span><b>${nf0.format(t.score || 0)}/100</b></div>
+        <div><span>${t.tp2 == null ? "Strateji" : "Skor"}</span><b>${t.tp2 == null ? "4s trend" : sc(t.score) + "/100"}</b></div>
         <div><span>Giriş</span><b>${price(t.entry_price)}</b></div>
         <div><span>Stop</span><b>${price(t.sl_initial || t.sl)}</b></div>
-        <div><span>TP1 / TP2</span><b>${price(t.tp1)} / ${price(t.tp2)}</b></div>
+        <div><span>${t.tp2 == null ? "Güncel stop" : "TP1 / TP2"}</span><b>${t.tp2 == null ? price(t.sl) : price(t.tp1) + " / " + price(t.tp2)}</b></div>
         <div><span>Çıkış</span><b>${price(t.exit_price)}</b></div>
         <div><span>Miktar</span><b>${qty(t.qty)}</b></div>
         <div><span>Risk</span><b>${t.risk_amount ? money(t.risk_amount) : "—"}</b></div>
@@ -495,14 +511,21 @@
       ["risk_per_trade_pct", "İşlem başı risk (%)", 0.1], ["leverage", "Kaldıraç (x)", 1], ["max_open_positions", "Maks. açık pozisyon", 1],
       ["max_same_direction", "Aynı yönde maks. pozisyon", 1], ["daily_loss_limit_pct", "Günlük zarar limiti (%)", 0.5],
       ["max_consecutive_losses", "Art arda stop limiti", 1], ["cooldown_hours", "Soğuma süresi (saat)", 1],
-      ["max_drawdown_pct", "Zirveden düşüşte durdur (%)", 1], ["min_stop_pct", "Min. stop mesafesi (%)", 0.05], ["max_stop_pct", "Maks. stop mesafesi (%)", 0.1]]],
+      ["max_drawdown_pct", "Zirveden düşüşte durdur (%)", 1]]],
     ["Strateji", [
+      ["strategy", "Strateji", { trend: "4 saatlik trend takibi (önerilen)", smc: "SMC likidite avı (eski)" }],
+      ["trend_n", "Trend: kırılım kanalı (4s mum)", 1], ["trend_stop_atr", "Trend: ilk stop (×ATR)", 0.1],
+      ["trend_exit_n", "Trend: iz süren stop (4s mum)", 1], ["universe_size", "Taranacak coin sayısı", 1],
+      ["fng_filter", "Korku endeksi: aşırı açgözlülükte long, aşırı korkuda short açma", "check"],
+      ["notify_setups", "Bulunan kurulumları da Telegram'a gönder", "check"]]],
+    ["SMC stratejisi (eski)", [
       ["entry_mode", "Giriş yöntemi", { ce: "FVG ortası (CE)", edge: "FVG'ye ilk temas", market: "MSS kapanışında piyasa" }],
       ["ltf", "Giriş zaman dilimi", { "5m": "5 dakika", "15m": "15 dakika", "1h": "1 saat" }],
       ["htf", "Trend zaman dilimi", { "1h": "1 saat", "4h": "4 saat" }],
       ["min_score", "Min. skor (0–100)", 1], ["min_rr", "Min. ödül/risk", 0.1], ["tp1_r", "TP1 mesafesi (R)", 0.1],
-      ["tp1_close_pct", "TP1'de kapatılacak (%)", 5], ["setup_expiry_bars", "Girişi bekleme (mum)", 1], ["universe_size", "Taranacak coin sayısı", 1],
-      ["require_liquidity_target", "Hedef olarak likidite seviyesi zorunlu", "check"], ["notify_setups", "Bulunan kurulumları da Telegram'a gönder", "check"]]],
+      ["tp1_close_pct", "TP1'de kapatılacak (%)", 5], ["setup_expiry_bars", "Girişi bekleme (mum)", 1],
+      ["require_liquidity_target", "Hedef olarak likidite seviyesi zorunlu", "check"],
+      ["min_stop_pct", "Min. stop mesafesi (%)", 0.05], ["max_stop_pct", "Maks. stop mesafesi (%)", 0.1]]],
     ["Demo ve maliyet", [
       ["paper_start_balance", "Demo başlangıç bakiyesi (USDT)", 10], ["taker_fee_pct", "Komisyon (%)", 0.01], ["slippage_pct", "Kayma (%)", 0.01],
       ["backtest_min_score", "Geçmiş test min. skor", 1]]],
@@ -518,8 +541,9 @@
       `<div class="set-actions"><button class="btn primary" type="submit">Ayarları kaydet</button><button class="btn ghost" type="button" id="setReset">Varsayılanlara dön</button></div>`;
     const upd = () => {
       const r = parseFloat($("[name=risk_per_trade_pct]").value) || 0;
-      const five = (1 - Math.pow(1 - r / 100, 5)) * 100;
-      $("#riskHint").textContent = r > 2 ? `Uyarı: %${nf1.format(r)} riskle art arda 5 stop kasanın yaklaşık %${nf0.format(five)}'ini götürür. Demoda bile %1–2 önerilir.` : "";
+      const ten = (1 - Math.pow(1 - r / 100, 10)) * 100;
+      $("#riskHint").textContent = r > 2 ? `Uyarı: trend takibinde kazanma oranı ~%37; art arda 10 stop normaldir. %${nf1.format(r)} riskle bu, kasanın yaklaşık %${nf0.format(ten)}'ini götürür. %1–2 önerilir.` +
+        " Kaldıraç sadece üst sınırdır: geniş stoplu işlemlerde likidasyon stoptan önce gelmesin diye otomatik düşer." : "Kaldıraç sadece üst sınırdır: geniş stoplu işlemlerde otomatik düşer.";
     };
     $("[name=risk_per_trade_pct]").oninput = upd; upd();
     $("#setReset").onclick = () => {
@@ -586,6 +610,20 @@
     const f = new FormData(e.target);
     act(() => api("/api/backtest", { body: { days: +f.get("days"), symbols: +f.get("symbols") } }), "Geçmiş test başladı");
   });
+  function renderBtNote(s) {
+    const trend = s.strategy === "trend";
+    $("#btNote").innerHTML = trend
+      ? `<b>4 saatlik trend takibi nasıl test edildi?</b> 40 vadeli coin, 2023–2026 (Ekim), komisyon ve kayma dahil, %1 risk,
+         en fazla 3 pozisyon. Seçim 2025–26 ile yapıldı, 2023–24 hiç bakılmadan doğrulandı. Aynı anda kırılan coinlerin seçimi
+         300 kez rastgele yapıldığında yıllık medyan getiri 2023 +%5, 2024 +%20, 2025 +%30, 2026 +%22; tipik en derin düşüş %8–18.
+         2023'te senaryoların %23'ü zararla bitti. Kazanma oranı ~%37: kazancın çoğu az sayıdaki büyük trendden gelir,
+         uzun kayıp serileri normaldir. Geçmiş sonuç geleceği garanti etmez.`
+      : `<b>Önce bunu oku.</b> SMC stratejisi Binance'in gerçek vadeli verisiyle (Mayıs–Ekim 2026, 40 coin) test edildi ve
+         tutarlı bir avantaj göstermedi (işlem başı yaklaşık −0,10R). Buradan güncel veriyle kendi testini çalıştırabilirsin.`;
+    $("#btHint").textContent = trend
+      ? "Test, canlı botla aynı kodu ve kuralları kullanır: 4s kapanışta kırılım, 3×ATR ilk stop, iz süren stop, korku endeksi filtresi (açıksa). Aynı mumda stop ve kırılım birlikte görülürse stop varsayılır."
+      : "Geçmişte likidasyon akışı ve emir defteri verisi bulunmadığı için testte yalnızca yapı + CVD puanı kullanılır (eşik: Ayarlar > Geçmiş test min. skor). Aynı mumda hem stop hem hedef görülürse stop varsayılır.";
+  }
   function renderBtProgress(b) {
     const p = $("#btProgress");
     p.hidden = !b.running;
@@ -606,8 +644,8 @@
     btTrades = r.trades.slice().reverse();
     const fill = dg.signals ? ` · ${dg.signals} sinyalin ${dg.filled}'i doldu (%${nf0.format(dg.filled / dg.signals * 100)})` : "";
     $("#btResult").innerHTML = `
-      <h2>Son test: ${pr.days} gün, ${pr.symbols.length} coin, ${pr.ltf}/${pr.htf}</h2>
-      <p class="muted small">${fmtTime(l.ts)} · işlem başı risk %${nf1.format(pr.risk_pct)} · min. skor ${pr.min_score}${fill}</p>
+      <h2>Son test: ${pr.days} gün, ${pr.symbols.length} coin, ${pr.strategy === "trend" ? "4s trend takibi" : pr.ltf + "/" + pr.htf}</h2>
+      <p class="muted small">${fmtTime(l.ts)} · ${pr.strategy === "trend" ? "4s trend takibi" + (pr.fng ? " · korku endeksi filtresi" : "") : "SMC · min. skor " + pr.min_score} · işlem başı risk %${nf1.format(pr.risk_pct)}${pr.strategy === "trend" ? "" : fill}</p>
       <div class="kpis">${kpis(st, [["Getiri", pct(st.return_pct), cls(st.return_pct)], ["Son bakiye (1000'den)", money(st.final_balance)]])}</div>
       <div id="btChart" class="eq-chart" style="margin-top:14px"></div>
       <div class="two"><div><h3>Sonuç dağılımı (R)</h3><div class="bars">${st.trades ? hist(st) : '<p class="empty">İşlem yok.</p>'}</div></div>

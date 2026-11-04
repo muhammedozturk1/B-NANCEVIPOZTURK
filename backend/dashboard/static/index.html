@@ -7,7 +7,7 @@
 <title>SMC Bot Paneli</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230E1726'/%3E%3Cpath d='M6 21l6-7 5 4 9-10' stroke='%23D9A441' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/fonts/fonts.css">
-<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="stylesheet" href="/static/style.css?v=4">
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -83,7 +83,7 @@
     <section data-panel="scanner" class="panel" hidden>
       <div id="scanInfo" class="scan-info"></div>
       <h2>Son adaylar</h2>
-      <p class="muted small">Her mum kapanışında coinler taranır. Eşiği geçen kurulumlar giriş fiyatını bekler, geçemeyenler burada nedenleriyle listelenir.</p>
+      <p class="muted small">Her taramada bulunan kırılımlar, kırılıma yakın coinler ve risk kurallarına ya da korku endeksine takılanlar nedenleriyle burada listelenir.</p>
       <div id="candList" class="cand-list"></div>
     </section>
 
@@ -98,19 +98,14 @@
     </section>
 
     <section data-panel="backtest" class="panel" hidden>
-      <div class="note warn">
-        <b>Önce bunu oku.</b> Bu strateji Binance'in gerçek vadeli verisiyle (Mayıs–Ekim 2026, en hacimli 15 coin, 15 dk)
-        test edildi: 170 işlem, ortalama −0,10R, profit factor 0,79. Mayıs–Temmuz zararlı (−0,29R), Ağustos–Ekim kârlı (+0,10R);
-        yani tutarlı bir avantaj henüz görünmüyor. Buradan güncel veriyle kendi testini çalıştırabilirsin.
-      </div>
+      <div class="note warn" id="btNote"></div>
       <form id="btForm" class="bt-form">
-        <label>Gün <input type="number" name="days" min="3" max="90" value="30"></label>
+        <label>Gün <input type="number" name="days" min="3" max="365" value="180"></label>
         <label>Coin sayısı <input type="number" name="symbols" min="1" max="40" value="10"></label>
         <button class="btn primary" type="submit">Testi başlat</button>
       </form>
       <div id="btProgress" class="progress" hidden><i></i><span></span></div>
-      <p class="muted small">Geçmişte likidasyon akışı ve emir defteri verisi bulunmadığı için testte yalnızca yapı + CVD puanı kullanılır
-        (eşik: Ayarlar &gt; Geçmiş test min. skor). Aynı mumda hem stop hem hedef görülürse stop varsayılır. Geçmiş sonuç geleceği garanti etmez.</p>
+      <p class="muted small" id="btHint"></p>
       <div id="btResult"></div>
     </section>
 
@@ -154,6 +149,6 @@
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="/static/app.js?v=2"></script>
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>
