@@ -35,7 +35,21 @@ class PaperBroker:
         db.kv_set("paper:balance", self.balance() + delta)
 
     def reset(self) -> None:
-        db.kv_set("paper:balance", float(self.s()["paper_start_balance"]))
+        b = float(self.s()["paper_start_balance"])
+        db.kv_set("paper:balance", b)
+        db.kv_set("paper:start_balance", b)  # Toplam K/Z bu değere göre (ayar sonradan değişse de)
+
+    def start_balance(self) -> float:
+        """Hesabın gerçekten başladığı bakiye. Eski kurulumlarda kayıt yoksa işlemlerden geri hesaplanır:
+        bakiye = başlangıç + tüm işlemlerin net K/Z'si (açık işlemlerin giriş komisyonu dahil)."""
+        v = db.kv_get("paper:start_balance")
+        if v is None:
+            pnl = sum(float(t.get("pnl") or 0) for t in db.list_trades("paper", ("open", "closed"), limit=100000))
+            v = self.balance() - pnl
+            if v <= 0:
+                v = float(self.s()["paper_start_balance"])
+            db.kv_set("paper:start_balance", round(v, 4))
+        return float(v)
 
     async def get_balance(self) -> float:
         return self.balance()

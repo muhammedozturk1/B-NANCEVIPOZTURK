@@ -742,7 +742,7 @@ class Bot:
 
     def gate(self) -> dict:
         s = self.settings
-        st = compute_stats(db.list_trades("paper", ("closed",), limit=5000), float(s["paper_start_balance"]))
+        st = compute_stats(db.list_trades("paper", ("closed",), limit=5000), self.paper.start_balance())
         ok_n = st["trades"] >= int(s["live_unlock_min_trades"])
         pf = st["profit_factor"] or 0
         ok_pf = pf >= float(s["live_unlock_min_pf"])
@@ -817,7 +817,7 @@ class Bot:
     def stats(self) -> dict:
         if time.time() - self._stats_cache[0] < 5 and self._stats_cache[1]:
             return self._stats_cache[1]
-        start = float(self.settings["paper_start_balance"]) if self.mode == "paper" else None
+        start = self.paper.start_balance() if self.mode == "paper" else None
         st = compute_stats(db.list_trades(self.mode, ("closed",), limit=5000), start)
         self._stats_cache = (time.time(), st)
         return st
@@ -841,7 +841,7 @@ class Bot:
             "leader": self.is_leader, "strategy": s.get("strategy", "smc"), "fng": self.fng_value,
             "server_time": self.now(), "balance": bal, "equity": eq, "upnl": upnl,
             "day_pnl": day_pnl, "day_limit": -dsb * s["daily_loss_limit_pct"] / 100,
-            "start_balance": float(s["paper_start_balance"]) if self.mode == "paper" else None,
+            "start_balance": self.paper.start_balance() if self.mode == "paper" else None,
             "positions": positions, "pending": pend,
             "risk": {"halted": g["halted"], "halt_reason": g["halt_reason"], "cooldown_until": g["cooldown_until"],
                      "peak_equity": g["peak_equity"],

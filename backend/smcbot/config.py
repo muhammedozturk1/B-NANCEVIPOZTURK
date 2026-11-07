@@ -100,6 +100,26 @@ DEFAULT_SETTINGS: dict = {
     "backtest_min_score": 55,
 }
 
+# Panelden girilen değerlerin geçerli aralıkları (yanlış yazılan 109 gibi değerler sınıra çekilir)
+SETTING_LIMITS: dict = {
+    "paper_start_balance": (10.0, 10_000_000.0),
+    "risk_per_trade_pct": (0.1, 10.0),
+    "leverage": (1, 50),
+    "max_open_positions": (1, 10),
+    "max_same_direction": (1, 10),       # ayrıca en fazla max_open_positions
+    "daily_loss_limit_pct": (1.0, 50.0),
+    "max_consecutive_losses": (1, 20),
+    "cooldown_hours": (0, 72),
+    "max_drawdown_pct": (5.0, 90.0),
+    "trend_n": (5, 100),
+    "trend_stop_atr": (0.5, 10.0),
+    "trend_exit_n": (2, 60),
+    "universe_size": (1, 60),
+    "taker_fee_pct": (0.0, 1.0),
+    "slippage_pct": (0.0, 1.0),
+    "live_unlock_min_trades": (1, 10_000),
+}
+
 INTERVAL_MS = {
     "1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
     "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000, "1d": 86_400_000,

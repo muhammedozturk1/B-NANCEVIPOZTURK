@@ -170,3 +170,35 @@ def test_stale_breakout_after_restart_is_not_registered(monkeypatch):
         await bot.md.rest.close()
 
     asyncio.run(scenario())
+
+
+def test_settings_are_clamped_to_sane_ranges():
+    """Panelde yanlış yazılan değerler (ör. aynı yönde 109) sınıra çekilir; aynı yön sınırı pozisyon sınırını aşamaz."""
+    st = db.save_settings({"max_open_positions": 5, "max_same_direction": 109, "risk_per_trade_pct": 80, "leverage": 0})
+    assert st["max_same_direction"] == 5 and st["risk_per_trade_pct"] == 10.0 and st["leverage"] == 1
+    st = db.save_settings({"max_open_positions": 3, "max_same_direction": 2, "risk_per_trade_pct": 1})
+    assert (st["max_open_positions"], st["max_same_direction"], st["risk_per_trade_pct"]) == (3, 2, 1.0)
+    assert db.get_settings()["max_same_direction"] == 2
+
+
+def test_total_pnl_uses_real_start_balance_not_current_setting():
+    """Sıfırlama 100 USDT ile yapıldıysa ayar sonradan 1000 olsa bile Toplam K/Z 100'e göre hesaplanır.
+    Eski kurulumda kayıt yoksa başlangıç, bakiye ve işlemlerden geri hesaplanır."""
+    async def scenario():
+        bot = Bot()
+        bot.save_settings({"paper_start_balance": 100.0})
+        bot.is_leader = True
+        await bot.reset()
+        bot.save_settings({"paper_start_balance": 1000.0})
+        assert bot.paper.start_balance() == 100.0
+        st = await bot.state()
+        assert st["start_balance"] == 100.0 and st["equity"] - st["start_balance"] == pytest.approx(0.0)
+        # eski kurulum: kayıt yok, bakiye 94, kapanan işlemlerin net K/Z'si -6 -> başlangıç 100
+        db.kv_set("paper:start_balance", None)
+        db.kv_set("paper:balance", 94.0)
+        db.insert_trade({"mode": "paper", "symbol": "TESTUSDT", "side": "LONG", "status": "closed", "pnl": -6.0,
+                         "setup_time": 1, "entry_time": 1, "exit_time": 2, "risk_amount": 5.0})
+        assert bot.paper.start_balance() == pytest.approx(100.0)
+        await bot.md.rest.close()
+
+    asyncio.run(scenario())

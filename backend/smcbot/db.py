@@ -110,7 +110,15 @@ def get_settings() -> dict:
     stored = kv_get("settings", {}) or {}
     merged = dict(config.DEFAULT_SETTINGS)
     merged.update({k: v for k, v in stored.items() if k in config.DEFAULT_SETTINGS})
-    return merged
+    return _clamp(merged)
+
+
+def _clamp(st: dict) -> dict:
+    for k, (lo, hi) in config.SETTING_LIMITS.items():
+        if isinstance(st.get(k), (int, float)) and not isinstance(st.get(k), bool):
+            st[k] = type(st[k])(min(hi, max(lo, st[k])))
+    st["max_same_direction"] = min(int(st["max_same_direction"]), int(st["max_open_positions"]))
+    return st
 
 
 def save_settings(values: dict) -> dict:
@@ -131,6 +139,7 @@ def save_settings(values: dict) -> dict:
         except (TypeError, ValueError):
             continue
         current[k] = v
+    current = _clamp(current)
     kv_set("settings", current)
     return current
 

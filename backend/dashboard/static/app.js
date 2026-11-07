@@ -529,7 +529,7 @@
       ["require_liquidity_target", "Hedef olarak likidite seviyesi zorunlu", "check"],
       ["min_stop_pct", "Min. stop mesafesi (%)", 0.05], ["max_stop_pct", "Maks. stop mesafesi (%)", 0.1]]],
     ["Demo ve maliyet", [
-      ["paper_start_balance", "Demo başlangıç bakiyesi (USDT)", 10], ["taker_fee_pct", "Komisyon (%)", 0.01], ["slippage_pct", "Kayma (%)", 0.01],
+      ["paper_start_balance", "Demo başlangıç bakiyesi (sıfırlamada geçerli)", 10], ["taker_fee_pct", "Komisyon (%)", 0.01], ["slippage_pct", "Kayma (%)", 0.01],
       ["backtest_min_score", "Geçmiş test min. skor", 1]]],
   ];
   async function loadSettings() {
@@ -540,14 +540,22 @@
       if (typeof kind === "object") return `<label>${label}<select name="${k}">${Object.entries(kind).map(([v, l]) => `<option value="${v}" ${String(st[k]) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>`;
       return `<label>${label}<input type="number" name="${k}" step="${kind}" value="${st[k]}"></label>`;
     }).join("")}${g === "Risk" ? '<p class="hint" id="riskHint"></p>' : ""}</fieldset>`).join("") +
-      `<div class="set-actions"><button class="btn primary" type="submit">Ayarları kaydet</button><button class="btn ghost" type="button" id="setReset">Varsayılanlara dön</button></div>`;
+      `<div class="set-actions"><button class="btn primary" type="submit">Ayarları kaydet</button><button class="btn ghost" type="button" id="setTested">Test edilen risk ayarlarını doldur</button><button class="btn ghost" type="button" id="setReset">Varsayılanlara dön</button></div>`;
     const upd = () => {
       const r = parseFloat($("[name=risk_per_trade_pct]").value) || 0;
       const ten = (1 - Math.pow(1 - r / 100, 10)) * 100;
       $("#riskHint").textContent = r > 2 ? `Uyarı: trend takibinde kazanma oranı ~%37; art arda 10 stop normaldir. %${nf1.format(r)} riskle bu, kasanın yaklaşık %${nf0.format(ten)}'ini götürür. %1–2 önerilir.` +
         " Kaldıraç sadece üst sınırdır: geniş stoplu işlemlerde likidasyon stoptan önce gelmesin diye otomatik düşer." : "Kaldıraç sadece üst sınırdır: geniş stoplu işlemlerde otomatik düşer.";
+      const mp = parseInt($("[name=max_open_positions]").value) || 0, md = parseInt($("[name=max_same_direction]").value) || 0;
+      if (mp > 3 || Math.min(md, mp) > 2) $("#riskHint").textContent += ` Uyarı: strateji en fazla 3 pozisyon ve aynı yönde en fazla 2 pozisyonla test edildi. ` +
+        `Aynı yönde çok pozisyon açıkken tek bir sert piyasa hareketi hepsini birlikte stop eder; 2023–2026 testinde bu ayarlar (%${nf1.format(r)} risk, ${mp} pozisyon, aynı yönde ${Math.min(md, mp)}) kasayı zirveden çok daha derin düşürdü.`;
     };
-    $("[name=risk_per_trade_pct]").oninput = upd; upd();
+    for (const k of ["risk_per_trade_pct", "max_open_positions", "max_same_direction"]) $(`[name=${k}]`).oninput = upd;
+    upd();
+    $("#setTested").onclick = () => {
+      for (const [k, v] of Object.entries({ risk_per_trade_pct: 1, max_open_positions: 3, max_same_direction: 2, daily_loss_limit_pct: 10 })) $(`[name=${k}]`).value = v;
+      upd(); toast("Test edilen risk ayarları dolduruldu. Uygulamak için Ayarları kaydet'e bas.");
+    };
     $("#setReset").onclick = () => {
       const d = settingsCache.defaults;
       $$("#setForm [name]").forEach(i => { if (i.type === "checkbox") i.checked = !!d[i.name]; else i.value = d[i.name]; });
@@ -560,7 +568,20 @@
     e.preventDefault();
     const body = {};
     $$("#setForm [name]").forEach(i => body[i.name] = i.type === "checkbox" ? i.checked : i.value);
-    act(async () => { settingsCache.settings = (await api("/api/settings", { body })).settings; }, "Ayarlar kaydedildi");
+    act(async () => {
+      const saved = (await api("/api/settings", { body })).settings;
+      settingsCache.settings = saved;
+      // sunucu geçersiz değerleri sınıra çeker (ör. aynı yönde 109 -> en fazla pozisyon sayısı): formu da güncelle
+      const fixed = [];
+      $$("#setForm input[type=number]").forEach(i => {
+        if (typeof saved[i.name] === "number" && parseFloat(i.value) !== saved[i.name]) {
+          i.value = saved[i.name];
+          fixed.push(`${i.closest("label").firstChild.textContent.trim()}: ${saved[i.name]}`);
+        }
+      });
+      if (fixed.length) setTimeout(() => toast("Geçerli aralığa çekildi — " + fixed.join(", ")), 1200);
+      $("[name=max_same_direction]").dispatchEvent(new Event("input"));
+    }, "Ayarlar kaydedildi");
   });
   function renderModeBox(s) {
     const g = s.gate;
