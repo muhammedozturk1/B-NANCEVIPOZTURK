@@ -21,9 +21,23 @@ class TPLevel:
         return asdict(self)
 
 
+def net_target_price(side: Side, entry: float, stop: float, cfg: Settings, target_r: float) -> float:
+    """Net kâr = target_r x net kayıp olacak hedef fiyatı (planned_rr ile aynı maliyet modeli).
+    Net kayıp = per_unit_loss (stop mesafesi + giriş/çıkış komisyonu + kayma)."""
+    tf, sl = cfg.taker_fee, cfg.slippage_pct
+    loss_u = abs(entry - stop) + entry * tf + stop * tf + (entry + stop) * sl
+    if side is Side.LONG:
+        return (target_r * loss_u + entry * (1 + tf + sl)) / (1 - tf)
+    return (entry * (1 - tf - sl) - target_r * loss_u) / (1 + tf)
+
+
 def tp_prices(side: Side, entry: float, stop: float, cfg: Settings) -> list[tuple[str, float, float]]:
     r = abs(entry - stop)
     s = side.sign
+    if getattr(cfg, "strategy", "smc") == "breakout":
+        px = net_target_price(side, entry, stop, cfg, cfg.bo_target_r)
+        rm = abs(px - entry) / r if r else 0.0
+        return [("TP1", rm, px), ("TP2", rm, px), ("TP3", rm, px)]
     return [("TP1", cfg.tp1_r, entry + s * cfg.tp1_r * r), ("TP2", cfg.tp2_r, entry + s * cfg.tp2_r * r),
             ("TP3", cfg.tp3_r, entry + s * cfg.tp3_r * r)]
 

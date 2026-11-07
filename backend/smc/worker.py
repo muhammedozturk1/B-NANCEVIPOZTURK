@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import signal as _signal
 import time
 
@@ -19,7 +20,8 @@ from backend.smc.config import Settings, get_settings
 from backend.smc.core.trial import ensure_trial, trial_status
 from backend.smc.core.types import Side, TIMEFRAME_MS, Candle, ensure_utc, now_ms, utc_now
 from backend.smc.database.db import Database
-from backend.smc.database.models import MarketSnapshot, TrialState, Trade
+from backend.smc.database.models import Base as SmcBase
+from backend.smc.database.models import BotConfig, MarketSnapshot, TrialState, Trade
 from backend.smc.database.repo import Repo
 from backend.smc.execution.gateway import AccountInfo, BinanceGateway
 from backend.smc.execution.kill_switch import flatten_all
@@ -38,6 +40,7 @@ from backend.smc.risk.correlation import correlation
 from backend.smc.risk.engine import (Candidate, OpenPositionView, PortfolioState, TradingGate, cooldown_active,
                              daily_loss_breached, evaluate_trade)
 from backend.smc.strategy.orderflow import OpenInterestTracker
+from backend.smc.strategy.breakout import evaluate_breakout
 from backend.smc.strategy.signal import MarketContext, components_as_dicts, evaluate_symbol
 
 log = logging.getLogger("worker")
@@ -61,6 +64,9 @@ class TradingWorker:
         self.notifier = TelegramNotifier(s.telegram_bot_token.get_secret_value(), s.telegram_chat_id, self.repo,
                                          env_label=f"SMC·{s.trading_env.upper()}")
         self.candles = CandleStore()
+        # breakout stratejisi 4s mumlarla çalışır; 3m/5m/15m korelasyon ve veri sağlığı için kalır
+        self.tfs: tuple[str, ...] = TFS + (("4h",) if s.strategy == "breakout" else ())
+        self.scan_tf = s.bo_tf if s.strategy == "breakout" else "3m"
         self.oi = OpenInterestTracker()
         self.fng = FearGreedProvider(s.fng_url) if s.fng_enabled else None
         self.filters: dict[str, SymbolFilters] = {}
@@ -121,6 +127,8 @@ class TradingWorker:
         self.repo.update_state(manual_hold_reasons=sorted(self.holds), safe_mode_reasons=sorted(self.safe_reasons))
 
     def trial_expired(self) -> bool:
+        if not self.s.trial_enabled:
+            return False
         with self.db.session() as sess:
             row = sess.get(TrialState, 1)
             return row is not None and trial_status(row, utc_now()).expired
@@ -234,6 +242,7 @@ class TradingWorker:
         st = self.repo.state()
         restart = st.worker_started_at is not None
         self.holds = set(st.manual_hold_reasons or [])
+        self._reset_for_strategy()
         self.repo.update_state(worker_started_at=now, state=BotStatus.INITIALIZING.value)
         self.repo.save_config("effective", self.s.public_dict())
 
@@ -243,16 +252,21 @@ class TradingWorker:
         await self.gw.account()
 
         now = utc_now()
-        with self.db.session() as sess:
-            had_trial = sess.get(TrialState, 1) is not None
-            row = ensure_trial(sess, now, self.s.trial_hours)
-            ts = trial_status(row, now)
-        if not had_trial:
-            self.notifier.notify("TRIAL_START", f"72 saatlik trial başladı. Bitiş: {ts.expires_at:%Y-%m-%d %H:%M} UTC")
-            self.repo.audit("worker", "trial_start", expires_at=ts.expires_at.isoformat())
+        if self.s.trial_enabled:
+            with self.db.session() as sess:
+                had_trial = sess.get(TrialState, 1) is not None
+                row = ensure_trial(sess, now, self.s.trial_hours)
+                ts = trial_status(row, now)
+            if not had_trial:
+                self.notifier.notify("TRIAL_START", f"72 saatlik trial başladı. Bitiş: {ts.expires_at:%Y-%m-%d %H:%M} UTC")
+                self.repo.audit("worker", "trial_start", expires_at=ts.expires_at.isoformat())
+            trial_txt = f"trial kalan {ts.remaining_s / 3600:.1f} saat"
+        else:
+            self._remove_trial_lock()
+            trial_txt = "süre kilidi yok"
         self.notifier.notify("RESTART" if restart else "STARTUP",
-                             f"Worker {'yeniden başladı' if restart else 'başladı'} | trial kalan "
-                             f"{ts.remaining_s / 3600:.1f} saat | durum hold={sorted(self.holds) or '-'}")
+                             f"Worker {'yeniden başladı' if restart else 'başladı'} | {trial_txt} | "
+                             f"durum hold={sorted(self.holds) or '-'}")
 
         info = await self.rest.exchange_info()
         filters = eligible_perpetuals(info, self.s)
@@ -269,7 +283,7 @@ class TradingWorker:
                 self.repo.system("ERROR", "position_mode", f"ONE-WAY moda geçilemedi: {exc}")
         await self.refresh_universe(initial=True)
 
-        if ts.expired and "expired" not in self.holds:
+        if self.s.trial_enabled and ts.expired and "expired" not in self.holds:
             await self.expire()
             return
         report = await reconcile(self.gw, self.repo, self.tm)
@@ -277,6 +291,51 @@ class TradingWorker:
         await self.refresh_account()
         self._ready_flag = True
         self._refresh_status()
+
+    # Strateji değişince işlem verisi bir kez temizlenir: sanal kasa starting_equity'den (100 USDT) başlar.
+    STRATEGY_TAG = {"breakout": "breakout-v1", "smc": "smc"}
+    WIPE_TABLES = {"smc_market_snapshots", "smc_signal_components", "smc_signals", "smc_fills", "smc_orders",
+                   "smc_trades", "smc_positions", "smc_pnl_snapshots", "smc_risk_events", "smc_system_events",
+                   "smc_telegram_events", "smc_bot_commands", "smc_trial_state"}
+
+    def _reset_for_strategy(self) -> None:
+        tag = self.STRATEGY_TAG.get(self.s.strategy, self.s.strategy)
+        with self.db.session() as sess:
+            row = sess.scalar(select(BotConfig).where(BotConfig.key == "strategy_epoch"))
+            if row is not None and (row.value or {}).get("tag") == tag:
+                return
+        if self.repo.open_positions():
+            self.repo.system("WARNING", "strategy_reset_skipped",
+                             "Açık pozisyon var; yeni strateji için veri sıfırlaması bir sonraki başlangıca kaldı")
+            return
+        with self.db.session() as sess:
+            for table in reversed(SmcBase.metadata.sorted_tables):
+                if table.name in self.WIPE_TABLES:
+                    sess.execute(table.delete())
+        self.holds.discard("expired")
+        self.repo.update_state(manual_hold_reasons=sorted(self.holds), consecutive_losses=0, cooldown_until=None,
+                               day_key=None, day_start_equity=None, month_key=None, month_start_equity=None,
+                               equity=self.s.starting_equity, unrealized_pnl=0.0, margin_used=0.0)
+        self.repo.save_config("strategy_epoch", {"tag": tag, "at": utc_now().isoformat()})
+        self.repo.audit("worker", "strategy_reset", tag=tag)
+        self.repo.system("INFO", "strategy_reset", f"Yeni strateji ({tag}): işlem geçmişi temizlendi, "
+                                                    f"sanal kasa {self.s.starting_equity:g} USDT'den başlıyor")
+        self.notifier.notify("STARTUP", f"Yeni strateji: 4 saatlik kırılım, stop kasanın %{self.s.risk_per_trade * 100:g}'i, "
+                                        f"hedef %{self.s.risk_per_trade * self.s.bo_target_r * 100:g}'i. "
+                                        f"Sanal kasa {self.s.starting_equity:g} USDT'den başladı."
+                             if self.s.strategy == "breakout" else f"Strateji: {tag}. Sanal kasa sıfırlandı.")
+
+    def _remove_trial_lock(self) -> None:
+        """Deneme kilidi kapalıyken: eski trial kaydını ve 'expired' kilidini kaldır (bot süresiz çalışır)."""
+        with self.db.session() as sess:
+            row = sess.get(TrialState, 1)
+            if row is not None:
+                sess.delete(row)
+        if "expired" in self.holds:
+            self.holds.discard("expired")
+            self._persist_holds()
+            self.repo.audit("worker", "trial_lock_removed")
+            self.repo.system("INFO", "trial_lock_removed", "72 saatlik deneme kilidi kaldırıldı; bot süresiz çalışır")
 
     def _handle_reconcile(self, report, ctx: str) -> None:
         for a in report.actions:
@@ -306,7 +365,7 @@ class TradingWorker:
 
     async def backfill(self, symbols: list[str]) -> None:
         for sym in symbols:
-            for tf in TFS:
+            for tf in self.tfs:
                 rows = await self.rest.klines(sym, tf, limit=499)
                 self.candles.set_history(sym, tf, [Candle.from_rest(r) for r in rows], self.rest.time.timestamp())
                 await asyncio.sleep(0)  # WebSocket okumasını bekletme
@@ -314,7 +373,7 @@ class TradingWorker:
     def _needs_backfill(self, sym: str) -> bool:
         now = now_ms()
         return any(len(self.candles.get(sym, tf)) < 300 or self.candles.has_gap(sym, tf)
-                   or self.candles.is_stale(sym, tf, now, self.s.market_data_stale_factor) for tf in TFS)
+                   or self.candles.is_stale(sym, tf, now, self.s.market_data_stale_factor) for tf in self.tfs)
 
     async def _backfill_background(self) -> None:
         """Bağlantı kurulunca eksik/bayat verisi olan sembolleri ARKA PLANDA doldurur. WebSocket bu sırada
@@ -331,7 +390,7 @@ class TradingWorker:
     async def _market_url(self) -> str:
         v = pick_variant(self._url_variant["market"], self.ws_market.consecutive_failures, 2)
         self._url_in_use["market"] = v
-        return market_stream_url(self.s.binance_ws_market_url, self.universe, TFS, variant=v)
+        return market_stream_url(self.s.binance_ws_market_url, self.universe, self.tfs, variant=v)
 
     async def _user_url(self) -> str:
         key = await self.rest.create_listen_key()
@@ -384,7 +443,7 @@ class TradingWorker:
                 return  # açık mum: strateji katmanına girmez
             sym, tf = data["s"], k["i"]
             self.candles.add_closed(sym, tf, Candle.from_ws(k))
-            if tf == "3m":
+            if tf == self.scan_tf:
                 self._scan_queue.put_nowait(int(k["T"]))
 
     async def _on_user(self, msg: dict) -> None:
@@ -583,6 +642,9 @@ class TradingWorker:
     async def scan(self, close_t: int) -> None:
         if not self.gate().can_trade and self.status in (BotStatus.EXPIRED, BotStatus.EMERGENCY_STOP):
             return  # piyasa taraması dahi gereksiz
+        if self.s.strategy == "breakout":
+            await self.scan_breakout(close_t)
+            return
         open_syms = {p.symbol for p in self.repo.open_positions()}
         fg = self.fng.value if self.fng else None
         for sym in list(self.universe):
@@ -603,6 +665,38 @@ class TradingWorker:
                 open_syms = {p.symbol for p in self.repo.open_positions()}
                 if sym in open_syms:
                     break
+
+    async def scan_breakout(self, close_t: int) -> None:
+        """4s kapanışında kanal kırılımlarını arar. Aynı kapanışta en fazla bo_max_new_per_bar yeni işlem
+        (aynı anda kırılan coinler çoğu zaman tek bir piyasa hareketidir); hangisinin alınacağı rastgele."""
+        fg = self.fng.value if self.fng else None
+        found = []
+        for sym in list(self.universe):
+            if sym not in self.filters or sym in self.foreign_symbols:
+                continue
+            if self.candles.has_gap(sym, self.scan_tf) or \
+                    self.candles.is_stale(sym, self.scan_tf, now_ms(), self.s.market_data_stale_factor):
+                continue
+            c4 = self.candles.get(sym, self.scan_tf, 200)
+            if not c4 or c4[-1].close_time < close_t - 60_000:
+                continue  # bu kapanışın mumu henüz gelmedi
+            found += evaluate_breakout(sym, c4, fg, self.s)
+        random.shuffle(found)
+        opened = 0
+        ctx = MarketContext(fear_greed=fg)
+        for ev in found:
+            open_syms = {p.symbol for p in self.repo.open_positions()}
+            if ev.setup is not None and ev.symbol in open_syms:
+                ev.reasons.append("position_exists_on_symbol")
+                ev.setup = None
+            elif ev.setup is not None and opened >= self.s.bo_max_new_per_bar:
+                ev.reasons.append(f"per_bar_limit:{self.s.bo_max_new_per_bar}")
+                ev.setup = None
+            await self._handle_signal(ev, ctx)
+            if ev.setup is not None and ev.symbol in {p.symbol for p in self.repo.open_positions()}:
+                opened += 1
+        self.repo.system("INFO", "breakout_scan", f"4s tarama: {len(found)} kırılım, {opened} işlem açıldı",
+                         candidates=len(found), opened=opened)
 
     async def _handle_signal(self, ev, ctx: MarketContext) -> None:
         reason = ";".join(ev.reasons) or None

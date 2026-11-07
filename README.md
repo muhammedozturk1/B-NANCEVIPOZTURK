@@ -1,4 +1,30 @@
-# Kripto Bot v4.2 — SMC Bot (4 saatlik trend takibi) + SMC Scalper
+# Kripto Bot v4.3 — SMC Bot (4 saatlik trend takibi) + SMC Scalper (4s kırılım, %1 stop / %2 hedef)
+
+## v4.3 — SMC Scalper: yeni strateji, süre kilidi kaldırıldı
+
+**İstek:** hızlı işlemler, stop = kasanın %1'i, kâr = kasanın %2'si, 100 USDT, işlem başı %1 risk.
+
+**Araştırma (12 ay 1 dakikalık veri, 15 coin; eğitim 2026-05..10, doğrulama 2025-11..2026-04):**
+5 giriş kuralı (1dk momentum+hacim, 5dk kırılım+1s trend, trendde RSI dönüşü, 1dk likidite süpürme+geri alma,
+rastgele giriş) × 4 stop genişliği (%0,5, %1, 1,5×ATR5, 3×ATR5), net 1:2 hedef. **20 kombinasyonun hepsi iki dönemde
+de zararlı** (bugünkü emir tipleriyle işlem başı −0,15R … −0,43R; iyimser maker emirlerle bile −0,05R … −0,24R) ve
+rastgele girişten farksız: bu vadede yön tahmin edilemiyor, komisyon+kayma riskin %15–40'ını yiyor. 100 USDT, 3 pozisyonla
+en hızlı kurulum kasayı 3–5 günde, en iyisi ~3 haftada yarıya indiriyordu. Daha hızlı trend takibi de tutmadı:
+1 saatlik kanal kırılımı doğrulamada −%0,2 … −%42, 15 dakikalık −%7 … −%91.
+
+**Seçilen sistem:** 4 saatlik kanal kırılımı (ana botla aynı giriş) + istenen çıkış: stop kasanın %1'i, tek hedef
+kasanın %2'si (komisyon sonrası net). 40 coin, %1 risk, en fazla 3 pozisyon: 2023 +%11, 2024 +%9, 2025 +%6,
+2026 (Oca–Eki) +%8; maks. düşüş %10–13; haftada ~2 işlem, işlem ~4–5 gün sürer. Ana botun iz süren stopundan zayıf
+ama her yıl artıda; ana bot demoda çalışırken bu sistem testnette **gerçek emirlerle** çalışır.
+
+- `backend/smc/strategy/breakout.py`, `SMC_STRATEGY=breakout` (varsayılan; eski SMC için `smc`).
+- Hedef fiyat dolum fiyatından hesaplanır (`risk/plan.py: net_target_price`): planlanan net RR tam 2,0.
+- Risk her zaman %1 (`SMC_BO_RISK_PER_TRADE`); eski `SMC_RISK_PER_TRADE` bu stratejide kullanılmaz.
+- Aynı 4s kapanışında en fazla 1 yeni işlem; Korku & Açgözlülük filtresi; ilişkili aynı yön pozisyon sınırı korunur.
+- 72 saatlik deneme kilidi varsayılan olarak kapalı (`SMC_TRIAL_ENABLED=true` ile açılır).
+- Strateji değişince SMC Scalper işlem verisi **bir kez** temizlenir (açık pozisyon yoksa): sanal kasa 100 USDT'den başlar.
+- Not: 1 USDT riskle BTC/ETH gibi yüksek minimum tutarlı coinlerde pozisyon Binance alt sınırının altında kalabilir;
+  bu işlemler "notional_below_min" ile atlanır.
 
 ## v4.2 — İyileştirme araştırması, görünürlük, günlük özet
 

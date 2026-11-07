@@ -45,8 +45,8 @@ services:
         value: shared
       - key: SMC_STARTING_EQUITY
         value: "100"
-      - key: SMC_RISK_PER_TRADE
-        value: "0.05"
+      - key: SMC_RISK_PER_TRADE   # eski SMC stratejisi için; varsayılan breakout stratejisi her zaman %1 kullanır
+        value: "0.01"
       - key: DATABASE_URL
         fromDatabase:
           name: crypto-bot-db

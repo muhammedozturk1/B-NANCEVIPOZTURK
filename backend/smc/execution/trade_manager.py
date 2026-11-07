@@ -171,7 +171,7 @@ class TradeManager:
             "NEW_LONG" if side is Side.LONG else "NEW_SHORT",
             f"{pos.symbol} {side.value} @ {avg:g} qty {filled:g} lev {pos.leverage}x | SL {stop:g} | "
             f"TP {', '.join(f'{l.price:g}' for l in levels)} | risk {pos.risk_amount:.2f} USDT | "
-            f"skor {setup.score}/15 | RR {rr:.2f}")
+            + (f"skor {setup.score}/15 | " if setup.score else "4s kırılım | ") + f"RR {rr:.2f}")
         return pos
 
     async def _wait_fill(self, symbol: str, cid: str, o: OrderInfo) -> OrderInfo:

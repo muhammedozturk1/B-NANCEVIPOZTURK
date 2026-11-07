@@ -12,7 +12,7 @@ SYMS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
 
 def _klines(path_params, now_ms):
-    tf = {"3m": 180_000, "5m": 300_000, "15m": 900_000}[path_params["interval"]]
+    tf = {"3m": 180_000, "5m": 300_000, "15m": 900_000, "4h": 14_400_000}[path_params["interval"]]
     limit = int(path_params.get("limit", 499))
     rng = random.Random(hash(path_params["symbol"] + path_params["interval"]) % 1000)
     start = now_ms - now_ms % tf - (limit - 1) * tf
@@ -76,4 +76,29 @@ def test_bootstrap_universe_backfill_reconcile_and_scan(db):
         last = w.candles.get("BTCUSDT", "3m")[-1].close_time
         await w.scan(last + 1)  # yapısal sinyaller DB'ye loglanır; ws hazır olmadığı için işlem açılmaz
         assert not w.repo.open_positions()
+    run(go())
+
+
+def test_bootstrap_breakout_strategy_loads_4h_and_scans(db):
+    """Yeni strateji: 4s mumlar da yüklenir, tarama 4s kapanışında yapılır, kasa 100 USDT, süre kilidi yok."""
+    s = make_settings(min_24h_quote_volume=0, universe_size=3, fng_enabled=False, strategy="breakout")
+    w = TradingWorker(s, db=db)
+    mock = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    w.rest = BinanceREST(s.binance_rest_url, "k", "s", client=mock)
+    w.public = BinanceREST(s.public_data_rest_url, client=mock)
+    w.gw.rest = w.rest
+    w.notifier.notify = lambda kind, text: None
+
+    async def go():
+        await w.bootstrap()
+        assert w.tfs[-1] == "4h" and w.scan_tf == "4h"
+        await w.backfill(w.universe)
+        assert len(w.candles.get("BTCUSDT", "4h")) >= 300
+        assert w.status == BotStatus.RUNNING and not w.trial_expired()
+        assert w.repo.state().equity == 100.0
+        last = w.candles.get("BTCUSDT", "4h")[-1].close_time
+        await w.scan(last + 1)  # websocket hazır değil: kırılım olsa da işlem açılmaz, sinyal loglanır
+        assert not w.repo.open_positions()
+        sigs = w.repo.recent_signals(10) if hasattr(w.repo, "recent_signals") else []
+        assert all(x.score == 0 for x in sigs)
     run(go())

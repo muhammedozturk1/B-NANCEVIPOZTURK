@@ -93,6 +93,10 @@ const REASON_TR = {
   stop_too_wide: v => `stop çok uzak (%${parseFloat(v).toFixed(1)}, en fazla %3)`,
   stop_too_tight: v => `stop çok yakın (%${parseFloat(v).toFixed(2)})`,
   score_below_min: v => `puan yetersiz (${v})`,
+  fng: v => "korku endeksi engeli: " + v,
+  stop_distance: v => `stop mesafesi uygun değil (%${(parseFloat(v)*100).toFixed(2)})`,
+  per_bar_limit: v => `bu 4s kapanışında zaten ${v} işlem açıldı (aynı anda kırılan coinler tek hareket sayılır)`,
+  position_exists_on_symbol: () => "bu coinde zaten pozisyon var",
   mandatory_failed: v => "zorunlu kontrol eksik: " + v.split(",").map(x => COMP_TR[x] || x).join(", "),
   rr_below_min: v => `kazanç/risk oranı düşük (${v})`,
   gate: v => ({websocket_not_ready:"websocket bağlı değil", SAFE_MODE:"güvenli mod", COOLDOWN:"bekleme süresi",
@@ -135,19 +139,19 @@ async function refresh() {
   $("ws").textContent = `ws market:${d.ws.market?"✓":"✗"} user:${d.ws.user?"✓":"✗"} rest:${d.rest_ok?"✓":"✗"}`;
   $("ws").className = "pill " + (d.ws.market && d.ws.user && d.rest_ok ? "ok" : "bad");
   const a = d.account, r = d.risk;
-  const tr = a.trial_remaining_s; $("trial").textContent = "trial " + (tr==null?"–": tr<=0 ? "BİTTİ" : `${Math.floor(tr/3600)}sa ${Math.floor(tr%3600/60)}dk`);
-  $("trial").className = "pill " + (tr>0 ? (tr<6*3600?"warn":"ok") : "bad");
+  const tr = a.trial_remaining_s; $("trial").textContent = tr==null ? "süre sınırı yok" : "trial " + (tr<=0 ? "BİTTİ" : `${Math.floor(tr/3600)}sa ${Math.floor(tr%3600/60)}dk`);
+  $("trial").className = "pill " + (tr==null || tr>0 ? (tr!=null && tr<6*3600?"warn":"ok") : "bad");
   $("equity").innerHTML = `${f(a.equity)} <span class="muted" style="font-size:13px">USDT</span>`;
   $("acct").innerHTML = kv([["Starting equity", f(a.starting_equity)], ["Available balance", f(a.available_balance)],
     ["Margin used", f(a.margin_used)], ["Unrealized PnL", f(a.unrealized_pnl,4), cls(a.unrealized_pnl)],
     ["Realized PnL", f(a.realized_pnl,4), cls(a.realized_pnl)], ["Daily PnL", f(a.daily_pnl,4), cls(a.daily_pnl)],
     ["Monthly PnL", f(a.monthly_pnl,4), cls(a.monthly_pnl)], ["Equity modu", a.equity_mode],
-    ["Trial bitiş", a.trial_expires_at ? new Date(a.trial_expires_at).toLocaleString() : "–"]]);
+    ["Trial bitiş", a.trial_expires_at ? new Date(a.trial_expires_at).toLocaleString() : "süresiz"]]);
   const dl = Math.max(0, -(a.daily_equity_change||0)) / ((r.day_start_equity||a.equity) * r.daily_loss_limit);
   $("risk").innerHTML = kv([["Risk / trade", pct(r.risk_per_trade)], ["Max open risk", pct(r.max_open_risk)],
     ["Daily loss limit", pct(r.daily_loss_limit)], ["Current open risk", `${f(r.current_open_risk,3)} (${pct(r.current_open_risk_pct)})`],
     ["Margin usage", pct(r.margin_usage_pct)], ["Max leverage", r.max_leverage+"x"],
-    ["Strateji modu", r.profile === "active" ? "Aktif" : "Şartname"],
+    ["Strateji", r.strategy === "breakout" ? "4s kırılım · stop %1 / hedef %2" : (r.profile === "active" ? "SMC (aktif)" : "SMC (şartname)")],
     ["Ardışık SL", r.consecutive_losses], ["Cooldown", r.cooldown_until ? new Date(r.cooldown_until).toLocaleTimeString() : "–"]]);
   $("riskbar").style.width = Math.min(100, r.current_open_risk_pct / r.max_open_risk * 100) + "%";
   $("dlbar").style.width = Math.min(100, dl*100) + "%";
@@ -155,7 +159,7 @@ async function refresh() {
   $("positions").innerHTML = `<tr><th>Coin</th><th>Yön</th><th>Durum</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th><th>Qty</th><th>Lev</th><th>Risk</th><th>Açık risk</th><th>Skor</th><th></th></tr>` +
     (d.positions.length ? d.positions.map(p => `<tr><td>${esc(p.symbol)}</td><td><span class="tag ${p.side}">${p.side}</span></td><td>${esc(p.state)}</td>
       <td>${px(p.entry)}</td><td>${px(p.sl)}${p.be_active?" (BE)":""}</td><td>${px(p.tp1)}</td><td>${px(p.tp2)}</td><td>${px(p.tp3)}</td>
-      <td>${p.remaining}/${p.qty}</td><td>${p.leverage}x</td><td>${f(p.risk_amount,3)}</td><td>${f(p.open_risk,3)}</td><td>${p.score??"–"}/15</td>
+      <td>${p.remaining}/${p.qty}</td><td>${p.leverage}x</td><td>${f(p.risk_amount,3)}</td><td>${f(p.open_risk,3)}</td><td>${p.score ? p.score + "/15" : "–"}</td>
       <td><button onclick="showChart(${p.id})">Grafik</button></td></tr>`).join("") : `<tr><td colspan="14" class="muted">Açık pozisyon yok</td></tr>`);
 
   $("trades").innerHTML = `<tr><th>Coin</th><th>Yön</th><th>Entry</th><th>Exit</th><th>Net PnL</th><th>R</th><th>Komisyon</th><th>Funding</th><th>Süre</th><th>Çıkış</th><th>TP</th><th>Skor</th><th></th></tr>` +
@@ -164,7 +168,7 @@ async function refresh() {
       <td>${dur(t.duration_s)}</td><td>${esc(t.exit_reason)}</td><td>${(t.tp_hits||[]).join(",")||"–"}</td><td>${t.score??"–"}</td>
       <td><button onclick="showChart(${t.position_id})">Replay</button></td></tr>`).join("") : `<tr><td colspan="13" class="muted">Henüz kapanan işlem yok</td></tr>`);
 
-  $("signals").innerHTML = d.signals.map(s => `<div title="${esc(s.reason||"")}"><span class="tag ${s.side}">${s.side}</span> <b>${esc(s.symbol)}</b> ${s.score}/15 ${s.accepted?'<span class="pos">✓ işlem açıldı</span>':'<br><span class="muted">'+esc(trReason(s.reason))+'</span>'}</div>`).join("") || '<div class="muted">Henüz sinyal yok</div>';
+  $("signals").innerHTML = d.signals.map(s => `<div title="${esc(s.reason||"")}"><span class="tag ${s.side}">${s.side}</span> <b>${esc(s.symbol)}</b> ${s.score ? s.score + "/15" : "4s kırılım"} ${s.accepted?'<span class="pos">✓ işlem açıldı</span>':'<br><span class="muted">'+esc(trReason(s.reason))+'</span>'}</div>`).join("") || '<div class="muted">Henüz sinyal yok</div>';
   $("events").innerHTML = d.events.map(e => `<div><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> <b class="${e.level==="ERROR"?"neg":""}">${esc(e.kind)}</b> ${esc(e.message)}</div>`).join("");
   $("riskev").innerHTML = d.commands.map(c => `<div><b>${esc(c.command)}</b> ${esc(c.status)} <span class="muted">${esc(c.result||"")}</span></div>`).join("") +
     d.risk_events.map(e => `<div><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> ${esc(e.kind)} ${esc(e.symbol||"")} <span class="muted">${esc(JSON.stringify(e.details)).slice(0,140)}</span></div>`).join("");

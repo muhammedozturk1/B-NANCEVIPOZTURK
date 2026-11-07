@@ -49,6 +49,20 @@ class Settings(BaseSettings):
     #   active : zorunlu kontroller ve risk kuralları AYNI; yalnızca eşikler gevşek (bkz. ACTIVE_PROFILE).
     # Bir parametre env ile açıkça verilirse (örn. SMC_MAX_STOP_PCT) profil onu ezmez.
     profile: Literal["spec", "active"] = "active"
+    # Strateji (SMC_STRATEGY):
+    #   breakout : 4 saatlik kanal kırılımı, stop = kasanın %1'i, tek hedef = kasanın %2'si (net). Varsayılan.
+    #   smc      : eski SMC/ICT pipeline (3m/5m/15m, TP1/TP2/TP3).
+    # Not: 1dk scalp kuralları ve 1s/15dk trend takibi geçmiş testte zarar etti (README, v4.3).
+    strategy: Literal["breakout", "smc"] = "breakout"
+    bo_tf: Literal["4h"] = "4h"
+    bo_channel: int = 20              # önceki N adet 4s mumun tepesi/dibi
+    bo_stop_atr: float = 3.0          # stop = kapanış -/+ K x ATR(14)
+    bo_risk_per_trade: float = 0.01   # stop olursa kasanın bu kadarı (komisyon dahil)
+    bo_target_r: float = 2.0          # hedef = net kâr, risk tutarının bu katı (kasanın %2'si)
+    bo_max_new_per_bar: int = 1       # aynı 4s kapanışında en fazla bu kadar yeni işlem
+    bo_fng_filter: bool = True
+    bo_min_stop_pct: float = 0.004
+    bo_max_stop_pct: float = 0.25     # geniş stoplarda kaldıraç likidasyon tamponu için otomatik düşer
 
     # ------------------------------------------------------------------ ortam
     trading_env: Literal["testnet", "demo"] = "testnet"
@@ -120,6 +134,8 @@ class Settings(BaseSettings):
     move_sl_to_tp1_after_tp2: bool = True
 
     # ------------------------------------------------------------------ trial
+    # Eski 72 saatlik deneme kilidi. Varsayılan KAPALI: bot süresiz çalışır (SMC_TRIAL_ENABLED=true ile açılır).
+    trial_enabled: bool = False
     trial_hours: int = 72
 
     # --------------------------------------------------------------- universe
@@ -190,6 +206,13 @@ class Settings(BaseSettings):
             for key, value in ACTIVE_PROFILE.items():
                 if key not in self.model_fields_set:
                     setattr(self, key, value)
+        if self.strategy == "breakout":
+            # Bu stratejide risk ve hedef yapısı sabittir: %1 risk, tek hedef (TP1 = pozisyonun tamamı).
+            # SMC_RISK_PER_TRADE (eski SMC ayarı) burada kullanılmaz; değiştirmek için SMC_BO_RISK_PER_TRADE.
+            self.risk_per_trade = self.bo_risk_per_trade
+            self.tp1_pct, self.tp2_pct, self.tp3_pct = 1.0, 0.0, 0.0
+            self.tp1_r = self.tp2_r = self.tp3_r = self.bo_target_r
+            self.min_rr = min(self.min_rr, self.bo_target_r * 0.95)
         host = urlparse(self.binance_rest_url).hostname or ""
         if host not in ALLOWED_TRADING_HOSTS:
             raise ValueError(
