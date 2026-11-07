@@ -74,6 +74,9 @@ DEFAULT_SETTINGS: dict = {
     "trend_stop_atr": 3.0,           # başlangıç stopu = K x ATR(14, 4s)
     "trend_exit_n": 10,              # iz süren stop: son M adet 4s mumun dibi/tepesi
     "fng_filter": True,              # aşırı açgözlülükte long, aşırı korkuda short açma
+    "trend_max_new_per_bar": 1,      # aynı 4s kapanışında en fazla bu kadar yeni giriş (aynı anda kırılan coinler
+                                     # çoğu zaman tek bir piyasa hareketidir; 2023-2026 testinde 1 en iyisi)
+    "telegram_daily_summary": True,  # her gün 23:05'te (TR) Telegram'a günlük özet
 
     # SMC stratejisi
     "entry_mode": "ce",              # ce | edge | market
@@ -114,6 +117,7 @@ SETTING_LIMITS: dict = {
     "trend_n": (5, 100),
     "trend_stop_atr": (0.5, 10.0),
     "trend_exit_n": (2, 60),
+    "trend_max_new_per_bar": (0, 10),     # 0 = sınırsız
     "universe_size": (1, 60),
     "taker_fee_pct": (0.0, 1.0),
     "slippage_pct": (0.0, 1.0),

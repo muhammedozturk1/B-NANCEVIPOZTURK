@@ -1,4 +1,31 @@
-# Kripto Bot v4.1 — SMC Bot (4 saatlik trend takibi) + SMC Scalper
+# Kripto Bot v4.2 — SMC Bot (4 saatlik trend takibi) + SMC Scalper
+
+## v4.2 — İyileştirme araştırması, görünürlük, günlük özet
+
+**Araştırma yöntemi:** Önceden belirlenen 13 değişiklik, botun kurallarıyla (%1 risk, 3 pozisyon, aynı yönde 2, korku endeksi
+filtresi, komisyon+kayma dahil) 40 coinde test edildi. Bir değişiklik ancak **hem 2025–26'da hem de hiç bakılmamış 2023–24'te**
+getiri/maks. düşüş oranını iyileştirirse ve yakın eşik değerlerinde de tutarsa eklendi (30 farklı sinyal sırası, medyan).
+
+| Değişiklik | 2025–26 getiri / maks. düşüş | 2023–24 getiri / maks. düşüş | Karar |
+|---|---|---|---|
+| Temel (v4.1) | +%57 / %16 | +%35 / %20 | — |
+| **Aynı 4s mumda en fazla 1 yeni giriş** | +%58 / %14 | +%40 / %18 | **Eklendi** (varsayılan 1) |
+| BTC yön filtresi (EMA200 / EMA50) | +%38 / %14 · +%31 / %13 | +%62 / %10 · +%45 / %17 | Eklenmedi (2025–26 bozuldu) |
+| Mum tepeye yakın kapanmalı (üst %25) | +%84 / %13 | +%30 / %16 | Eklenmedi (%20/%33/%40 eşiklerinde doğrulama bozuldu: şans) |
+| Hacim ≥ 1,0x / 1,5x | +%52 / %13 · +%48 / %13 | +%32 / %22 · +%22 / %17 | Eklenmedi |
+| Aşırı uzamış kırılımı atla (>1 / >1,5 ATR) | +%58 / %12 · +%55 / %13 | +%23 / %21 · +%23 / %24 | Eklenmedi |
+| 3R / 5R kârdan sonra stopu sıkılaştır | +%53 / %14 · +%59 / %15 | +%17 / %22 · +%16 / %22 | Eklenmedi |
+| Zaman stopu (12 / 18 mum) | +%61 / %15 · +%49 / %16 | +%26 / %21 · +%46 / %21 | Eklenmedi |
+
+Etkisi küçük ama tutarlı: aynı anda kırılan coinler çoğu zaman tek bir piyasa hareketidir; hepsine birden girmek aynı bahsi
+büyütmektir. **Asıl fark risk ayarındadır:** aynı testte %5 risk + 5 pozisyon + yön sınırı yok, kasayı zirveden ~%92 düşürdü.
+
+**Diğer değişiklikler:**
+- Pozisyonlar sekmesi limit dolduğunda neden yeni işlem açılmadığını yazar; Tarayıcı son taramanın sonucunu gösterir
+  (kaç kırılım, kaçı açıldı, kaçı hangi nedenle atlandı).
+- Telegram: her gün 23:05'te (TR) günlük özet (equity, toplam K/Z, bugün kapananlar, açık pozisyonlar ve stopları).
+  Ayarlar > Bağlantılar'da "Günlük özeti şimdi gönder". Telegram tutarları Türkçe biçimde.
+- v4.1.2: Toplam K/Z gerçek başlangıç bakiyesinden; ayarlara geçerli aralık; "Test edilen risk ayarlarını doldur" düğmesi.
 
 ## v4.1 — Strateji değişti: 4 saatlik trend takibi
 

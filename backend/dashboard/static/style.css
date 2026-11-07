@@ -290,3 +290,7 @@ input[type=number], input[type=text], input:not([type]), select { background: va
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+.notice { margin: 0 0 14px; padding: 10px 14px; border: 1px solid var(--brass); border-radius: var(--r-sm); color: var(--brass); font-size: 13.5px; line-height: 1.45; background: color-mix(in srgb, var(--brass) 8%, transparent); }
+.notice.soft { border-color: var(--line); color: var(--muted); background: var(--ink-2); }
+.scan-info .wide { grid-column: 1 / -1; }

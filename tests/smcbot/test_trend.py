@@ -202,3 +202,81 @@ def test_total_pnl_uses_real_start_balance_not_current_setting():
         await bot.md.rest.close()
 
     asyncio.run(scenario())
+
+
+def test_one_new_entry_per_4h_bar(monkeypatch):
+    """Aynı 4s kapanışında iki coin kırılırsa sadece biri açılır (2023-2026 testinde getiriyi artırıp düşüşü azalttı);
+    diğeri tarayıcıda nedeniyle görünür ve tarama özeti panele yazılır."""
+    import dataclasses
+    monkeypatch.setattr(config, "OFFLINE_SIM", False)
+    from backend.smcbot import fng
+
+    async def scenario():
+        bot = Bot()
+        sym2 = dataclasses.replace(SYM, symbol="TEST2USDT", base="TEST2")
+        bot.md.symbols.update({"TESTUSDT": SYM, "TEST2USDT": sym2})
+        bot.md.universe = ["TESTUSDT", "TEST2USDT"]
+        bot.save_settings({"running": True, "risk_per_trade_pct": 1.0, "strategy": "trend", "trend_max_new_per_bar": 1})
+
+        async def nothing(*a, **k):
+            return None
+
+        async def fake_fng(*a, **k):
+            return 50
+
+        closes = flat_then_breakout(True)
+
+        async def fake_candles(sym, iv, limit=300):
+            return candles(closes, t0=bot.now() - 60_000 - len(closes) * H4)
+
+        monkeypatch.setattr(bot.md, "refresh_universe", nothing)
+        monkeypatch.setattr(bot.md, "candles", fake_candles)
+        monkeypatch.setattr(fng, "latest", fake_fng)
+        bot.md.marks.update({"TESTUSDT": (104.1, bot.now()), "TEST2USDT": (104.1, bot.now())})
+        await bot.scan_trend()
+        assert len(db.list_trades("paper", ("open",))) == 1
+        assert any(c["status"].startswith("Atlandı: bu 4s mumda zaten 1") for c in bot.candidates)
+        assert "1 işlem açıldı" in bot.scan_info["summary"] and "1 atlandı" in bot.scan_info["summary"]
+        st = await bot.state()
+        assert st["limits"]["per_bar"] == 1
+        await bot.md.rest.close()
+
+    asyncio.run(scenario())
+
+
+def test_backtest_portfolio_one_entry_per_bar():
+    mk = lambda sym, a, b: {"symbol": sym, "side": "LONG", "entry_time": a, "exit_time": b, "r_multiple": 1.0,  # noqa: E731
+                            "status": "closed"}
+    tr = [mk("A", 0, 10), mk("B", 0, 10), mk("C", 4, 10)]
+    assert [t["symbol"] for t in portfolio(tr, dict(S, trend_max_new_per_bar=1))["trades"]] == ["A", "C"]
+    assert len(portfolio(tr, dict(S, trend_max_new_per_bar=0))["trades"]) == 2  # aynı yönde en fazla 2
+
+
+def test_daily_summary_sent_once_per_day(monkeypatch):
+    from datetime import datetime
+    from backend.smcbot import telegram
+    from backend.smcbot.bot import TZ_TR
+
+    async def scenario():
+        bot = Bot()
+        bot.save_settings({"paper_start_balance": 100.0})
+        bot.is_leader = True
+        await bot.reset()
+        sent = []
+        monkeypatch.setattr(telegram, "configured", lambda: True)
+        monkeypatch.setattr(bot, "notify", lambda text: sent.append(text))
+        at = lambda h, m: int(datetime(2026, 11, 7, h, m, tzinfo=TZ_TR).timestamp() * 1000)  # noqa: E731
+        await bot._maybe_daily_summary(at(22, 59))
+        assert sent == []
+        await bot._maybe_daily_summary(at(23, 6))
+        await bot._maybe_daily_summary(at(23, 30))
+        assert len(sent) == 1
+        txt = sent[0]
+        assert "günlük özet" in txt and "Equity: <b>100,00 USDT</b>" in txt and "Açık pozisyon: 0/" in txt
+        bot.save_settings({"telegram_daily_summary": False})
+        db.kv_set("tg:summary_day:paper", None)
+        await bot._maybe_daily_summary(at(23, 10))
+        assert len(sent) == 1
+        await bot.md.rest.close()
+
+    asyncio.run(scenario())

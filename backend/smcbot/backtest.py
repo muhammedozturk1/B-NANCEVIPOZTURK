@@ -113,6 +113,8 @@ def portfolio(trades: list[dict], s: dict, start_balance: float = 1000.0) -> dic
     import heapq
     max_pos = int(s["max_open_positions"])
     max_dir = int(s.get("max_same_direction", max_pos))
+    per_bar = int(s.get("trend_max_new_per_bar", 0) or 0) if s.get("strategy") == "trend" else 0
+    bar_cnt: dict = {}
     bal = start_balance
     heap: list = []  # (exit_time, sıra, işlem)
     kept: list[dict] = []
@@ -132,6 +134,9 @@ def portfolio(trades: list[dict], s: dict, start_balance: float = 1000.0) -> dic
         if len(live) >= max_pos or any(x["symbol"] == t["symbol"] for x in live) or \
                 sum(1 for x in live if x["side"] == t["side"]) >= max_dir:
             continue
+        if per_bar and bar_cnt.get(t["entry_time"], 0) >= per_bar:
+            continue
+        bar_cnt[t["entry_time"]] = bar_cnt.get(t["entry_time"], 0) + 1
         risk_amt = bal * s["risk_per_trade_pct"] / 100
         t = dict(t, pnl=risk_amt * t["r_multiple"], fees=risk_amt * t.get("fee_r", 0.0), risk_amount=risk_amt,
                  id=len(kept) + 1)

@@ -222,6 +222,15 @@ async def tg_test(request: Request):
     return {"ok": True}
 
 
+@router.post("/api/telegram/summary")
+async def tg_summary(request: Request):
+    csrf(request)
+    sent, err = await telegram.send(await B().daily_summary())
+    if not sent:
+        raise HTTPException(400, err)
+    return {"ok": True}
+
+
 @router.post("/api/backtest")
 async def backtest_start(request: Request):
     csrf(request)

@@ -222,8 +222,18 @@
       ${t.sl !== t.sl_initial ? `<div class="tick" style="left:${sl}%" title="${trail ? "İz süren stop" : "Güncel stop"}"></div>` : ""}
       <div class="dot" style="left:${m}%"></div></div>`;
   }
+  function posNotice(s) {
+    const lim = s.limits || {}, scn = s.scan || {};
+    const next = scn.next_scan ? ` Sonraki tarama ${fmtClock(scn.next_scan)}.` : "";
+    const last = scn.summary ? ` Son tarama: ${esc(scn.summary)}.` : "";
+    if (lim.max_open && s.positions.length >= lim.max_open)
+      return `<p class="notice">Pozisyon limiti dolu (${s.positions.length}/${lim.max_open}): yeni kırılımlar bir pozisyon kapanana kadar atlanır.${last}${next}</p>`;
+    if (s.running && scn.summary) return `<p class="notice soft">${esc(scn.summary.charAt(0).toUpperCase() + scn.summary.slice(1))}.${next}</p>`;
+    return "";
+  }
   function renderPositions(s) {
     const el = $("#posList");
+    $("#posNotice").innerHTML = posNotice(s);
     if (!s.positions.length) {
       el.innerHTML = `<p class="empty">${s.running ? "Açık pozisyon yok. Bot her mum kapanışında kurulum arıyor." : "Açık pozisyon yok. Yeni işlem aranması için Başlat'a bas."}</p>`;
       return;
@@ -310,7 +320,8 @@
       <div><span>Strateji</span><b>${s.strategy === "trend" ? "4s trend takibi" : "SMC"}</b></div>
       <div><span>Zaman dilimi</span><b>${s.strategy === "trend" ? "4 saat" : scn.ltf + " giriş / " + scn.htf + " trend"}</b></div>
       <div><span>Korku endeksi</span><b>${s.fng == null ? "—" : s.fng}</b></div>
-      <div><span>Süre</span><b>${scn.duration ? nf2.format(scn.duration) + " sn" : "—"}</b></div>`;
+      <div><span>Süre</span><b>${scn.duration ? nf2.format(scn.duration) + " sn" : "—"}</b></div>
+      <div class="wide"><span>Son tarama sonucu</span><b>${esc(scn.summary || "—")}</b></div>`;
     const el = $("#candList");
     if (!s.candidates.length) { el.innerHTML = `<p class="empty">Henüz aday yok. İlk tarama ${s.strategy === "trend" ? "bir sonraki 4 saatlik" : ""} mum kapanışında yapılır.</p>`; return; }
     el.innerHTML = s.candidates.map(c => `
@@ -517,9 +528,11 @@
     ["Strateji", [
       ["strategy", "Strateji", { trend: "4 saatlik trend takibi (önerilen)", smc: "SMC likidite avı (eski)" }],
       ["trend_n", "Trend: kırılım kanalı (4s mum)", 1], ["trend_stop_atr", "Trend: ilk stop (×ATR)", 0.1],
-      ["trend_exit_n", "Trend: iz süren stop (4s mum)", 1], ["universe_size", "Taranacak coin sayısı", 1],
+      ["trend_exit_n", "Trend: iz süren stop (4s mum)", 1], ["trend_max_new_per_bar", "Trend: aynı 4s mumda maks. yeni giriş (0 = sınırsız)", 1],
+      ["universe_size", "Taranacak coin sayısı", 1],
       ["fng_filter", "Korku endeksi: aşırı açgözlülükte long, aşırı korkuda short açma", "check"],
-      ["notify_setups", "Bulunan kurulumları da Telegram'a gönder", "check"]]],
+      ["notify_setups", "Bulunan kurulumları da Telegram'a gönder", "check"],
+      ["telegram_daily_summary", "Her gün 23:05'te Telegram'a günlük özet gönder", "check"]]],
     ["SMC stratejisi (eski)", [
       ["entry_mode", "Giriş yöntemi", { ce: "FVG ortası (CE)", edge: "FVG'ye ilk temas", market: "MSS kapanışında piyasa" }],
       ["ltf", "Giriş zaman dilimi", { "5m": "5 dakika", "15m": "15 dakika", "1h": "1 saat" }],
@@ -621,9 +634,11 @@
       row("Worker (SMC Scalper)", s.worker ? (s.worker.alive === true ? "Çalışıyor" : s.worker.alive === false ?
         (s.worker.age_min == null ? "Henüz durum bildirmedi" : `${nf0.format(s.worker.age_min)} dakikadır sessiz`) : "Bilinmiyor") +
         (s.worker.smc_error ? " · son hata: " + s.worker.smc_error.slice(0, 80) : "") : "—", s.worker ? s.worker.alive : null) +
-      `<div class="set-actions"><button class="btn" id="tgTest" ${h.telegram ? "" : "disabled"}>Telegram'a deneme mesajı gönder</button></div>` +
+      `<div class="set-actions"><button class="btn" id="tgTest" ${h.telegram ? "" : "disabled"}>Telegram'a deneme mesajı gönder</button>` +
+      `<button class="btn ghost" id="tgSummary" ${h.telegram ? "" : "disabled"}>Günlük özeti şimdi gönder</button></div>` +
       `<p class="muted small">Grafikler <a href="https://www.tradingview.com/" target="_blank" rel="noopener" style="color:inherit">TradingView</a> Lightweight Charts ile çizilir.</p>`;
     $("#tgTest").onclick = () => act(() => api("/api/telegram/test", { method: "POST" }), "Deneme mesajı gönderildi");
+    $("#tgSummary").onclick = () => act(() => api("/api/telegram/summary", { method: "POST" }), "Günlük özet gönderildi");
   }
 
   // ---------------- geçmiş test ----------------

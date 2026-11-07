@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import socket
 import time
 import traceback
 import uuid
 from collections import deque
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from . import backtest, coinglass, config, db, fng, telegram, trend
 from .binance_client import BinanceError, BinanceREST
@@ -16,6 +19,8 @@ from .config import INTERVAL_MS
 from .market import MarketData
 from .risk import RiskGuard, compute_stats, size_position
 from .strategy import SymbolAnalyzer, fmt_price
+
+TZ_TR = ZoneInfo("Europe/Istanbul")
 
 MODE_TR = {"paper": "Demo", "testnet": "Testnet", "live": "Gerçek"}
 LEASE = "main"
@@ -334,18 +339,35 @@ class Bot:
             for c in cands:
                 self._candidate_raw(c)
             now = self.now()
+            opened, skipped = 0, {}
+            per_bar = int(s.get("trend_max_new_per_bar", 0) or 0)
+            random.shuffle(found)  # aynı anda kırılanlardan hangisinin alınacağı rastgele (geçmiş testteki gibi)
             for sig in found:
                 late_min = (now - sig.setup_time) / 60_000
-                if late_min > 15:
+                if per_bar and opened >= per_bar and sig.key not in self.seen_keys:
+                    why = f"bu 4s mumda zaten {per_bar} yeni giriş yapıldı"
+                    self._candidate(sig, f"Atlandı: {why} (aynı anda kırılan coinler çoğu zaman tek bir piyasa hareketidir)")
+                    self.seen_keys.add(sig.key)
+                elif late_min > 15:
                     # bot yeniden başladığında son kapanmış mum eski olabilir: geç girilmez (test edilen kural:
                     # kapanışın hemen ardından giriş). İşlem olarak kaydetme, sadece tarayıcıda göster.
                     self._candidate(sig, f"Geç kalındı: mum {late_min:.0f} dk önce kapandı, girilmedi")
                     self.seen_keys.add(sig.key)
-                    continue
-                await self._register_signal(sig)
+                    why = "geç kalındı (bot yeni başladı)"
+                else:
+                    why = await self._register_signal(sig)
+                if why is None:
+                    opened += 1
+                elif why != "daha önce görüldü":
+                    skipped[why] = skipped.get(why, 0) + 1
         dt = time.time() - t0
-        self.scan_info.update(last_scan=self.now(), duration=round(dt, 2), scanned=len(syms),
-                              signals=len(found), status="Bekliyor (sonraki 4 saatlik mum kapanışı)")
+        summary = f"son taramada {len(found)} kırılım"
+        if found:
+            parts = ([f"{opened} işlem açıldı"] if opened else []) + [f"{k} atlandı: {v}" for v, k in skipped.items()]
+            summary += " · " + ", ".join(parts)
+        self.scan_info.update(last_scan=self.now(), duration=round(dt, 2), scanned=len(syms), signals=len(found),
+                              opened=opened, skipped=skipped, summary=summary,
+                              status="Bekliyor (sonraki 4 saatlik mum kapanışı)")
         self.log("info", f"4s tarama: {len(syms)} coin, {len(found)} kırılım, korku endeksi "
                          f"{self.fng_value if self.fng_value is not None else '—'} ({dt:.1f} sn)")
 
@@ -369,6 +391,40 @@ class Bot:
         db.update_trade(t["id"], sl=new, meta=meta)
         self.log("info", f"#{t['id']} {t['symbol']} {t['side']} iz süren stop: {fmt_price(t['sl'])} → {fmt_price(new)}")
 
+    async def _maybe_daily_summary(self, now: int) -> None:
+        """Her gün 23:05'ten sonra (TR saati, 23:00 taramasının ardından) bir kez Telegram'a özet gönderir."""
+        if not self.settings.get("telegram_daily_summary", True) or not telegram.configured():
+            return
+        lt = datetime.fromtimestamp(now / 1000, TZ_TR)
+        day = lt.strftime("%Y-%m-%d")
+        key = f"tg:summary_day:{self.mode}"
+        if (lt.hour, lt.minute) < (23, 5) or db.kv_get(key) == day:
+            return
+        db.kv_set(key, day)
+        try:
+            self.notify(await self.daily_summary())
+        except Exception as e:  # noqa: BLE001
+            self.log("warn", f"Günlük özet hazırlanamadı: {e}")
+
+    async def daily_summary(self) -> str:
+        now = self.now()
+        lt = datetime.fromtimestamp(now / 1000, TZ_TR)
+        day0 = int(lt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+        bal, eq, upnl = await self.equity()
+        closed = [t for t in db.list_trades(self.mode, ("closed",), limit=300) if (t.get("exit_time") or 0) >= day0]
+        positions = []
+        for t in self.open_trades():
+            u, ur = self.unrealized(t)
+            positions.append({**t, "upnl": u, "upnl_r": ur})
+        g = self.guard.state()
+        return telegram.msg_daily({
+            "date": lt.strftime("%d.%m.%Y"), "mode": self.mode, "equity": eq, "upnl": upnl,
+            "start": self.paper.start_balance() if self.mode == "paper" else None,
+            "closed": sorted(closed, key=lambda t: t.get("exit_time") or 0), "positions": positions,
+            "max_open": int(self.settings["max_open_positions"]), "scan_summary": self.scan_info.get("summary"),
+            "running": self.settings["running"], "halted": g["halt_reason"] if g["halted"] else None,
+        })
+
     def _candidate_raw(self, c: dict) -> None:
         self.candidates.appendleft({
             "time": self.now(), "symbol": c["symbol"], "side": c["side"], "score": None, "structure": None,
@@ -390,15 +446,16 @@ class Bot:
             "reasons": [r["text"] for r in sig.reasons if r.get("ok")][:6],
         })
 
-    async def _register_signal(self, sig) -> None:
+    async def _register_signal(self, sig) -> str | None:
+        """Sinyali işleme dönüştürür. Dönüş: None = kaydedildi, metin = neden atlandığı."""
         s = self.settings
         if sig.key in self.seen_keys:
-            return
+            return "daha önce görüldü"
         self.seen_keys.add(sig.key)
         active = db.list_trades(self.mode, ("open", "pending"), limit=50)
         if any(t["symbol"] == sig.symbol for t in active):
             self._candidate(sig, "Atlandı: bu coinde açık/bekleyen işlem var")
-            return
+            return "bu coinde zaten işlem var"
         ok, why = self.guard.can_open(sig.side, sig.symbol, active, self.now(), s)
         if ok:
             pend_same = sum(1 for t in active if t["status"] == "pending")
@@ -407,7 +464,7 @@ class Bot:
                 ok, why = False, "Bekleyen giriş sayısı dolu"
         if not ok:
             self._candidate(sig, f"Risk engeli: {why}")
-            return
+            return why
         ann = dict(sig.annotations)
         if not ann.get("tf"):
             ann["tf"] = s["ltf"]
@@ -431,6 +488,7 @@ class Bot:
                              f"hedef {fmt_price(sig.tp2)} (RR {sig.rr}, skor {sig.score:.0f})")
         if s["notify_setups"]:
             self.notify(telegram.msg_setup(sig.to_dict(), self.mode))
+        return None
 
     # ------------------------------------------------------------------ fiyat döngüsü
     async def _tick(self) -> None:
@@ -674,6 +732,7 @@ class Bot:
                 self.save_settings({"running": False})
                 for t in self.pending_trades():
                     self._cancel(t, "Risk kilidi")
+            await self._maybe_daily_summary(now)
             if time.time() - self._last_equity >= (20 if self.sim else 300):
                 db.add_equity_point(self.mode, bal, eq, now)
                 self._last_equity = time.time()
@@ -843,6 +902,8 @@ class Bot:
             "day_pnl": day_pnl, "day_limit": -dsb * s["daily_loss_limit_pct"] / 100,
             "start_balance": self.paper.start_balance() if self.mode == "paper" else None,
             "positions": positions, "pending": pend,
+            "limits": {"max_open": int(s["max_open_positions"]), "max_dir": int(s["max_same_direction"]),
+                       "per_bar": int(s.get("trend_max_new_per_bar", 0) or 0)},
             "risk": {"halted": g["halted"], "halt_reason": g["halt_reason"], "cooldown_until": g["cooldown_until"],
                      "peak_equity": g["peak_equity"],
                      "drawdown_pct": ((g["peak_equity"] - eq) / g["peak_equity"] * 100) if g["peak_equity"] else 0.0},
