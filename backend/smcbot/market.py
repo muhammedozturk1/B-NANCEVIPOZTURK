@@ -33,6 +33,7 @@ class MarketData:
         self.symbols: dict[str, SymbolInfo] = {}
         self.universe: list[str] = []
         self.marks: dict[str, tuple[float, int]] = {}
+        self.lasts: dict[str, tuple[float, int]] = {}   # son işlem fiyatı (!miniTicker@arr), tetik kaynağı last_price için
         self.funding: dict[str, tuple[float, int]] = {}
         self.liq = LiquidationTracker(self.clock.now_ms)
         self.stream: MarketStream | None = None
@@ -70,7 +71,7 @@ class MarketData:
             self.stream.stop()
         if self._stream_task:
             self._stream_task.cancel()
-        self.stream = MarketStream(self.ws_url(), ["!markPrice@arr@1s", "!forceOrder@arr"], self._on_ws)
+        self.stream = MarketStream(self.ws_url(), ["!markPrice@arr@1s", "!forceOrder@arr", "!miniTicker@arr"], self._on_ws)
         self._stream_task = asyncio.create_task(self.stream.run(self.log))
 
     def _on_ws(self, stream: str, data) -> None:
@@ -84,6 +85,12 @@ class MarketData:
                     pass
         elif stream.startswith("!forceOrder"):
             self.liq.add(data)
+        elif stream.startswith("!miniTicker") and isinstance(data, list):
+            for d in data:
+                try:
+                    self.lasts[d["s"]] = (float(d["c"]), int(d["E"]))
+                except (KeyError, TypeError, ValueError):
+                    pass
 
     def ws_ok(self) -> bool:
         if self.sim:
@@ -124,6 +131,13 @@ class MarketData:
         if self.clock.now_ms() - m[1] > 60_000:
             return None  # bayat fiyatla işlem yapma
         return m[0]
+
+    def last(self, symbol: str) -> float | None:
+        """Son işlem fiyatı; yoksa/bayatsa mark fiyatına düşer (simülasyonda ikisi aynıdır)."""
+        m = self.lasts.get(symbol)
+        if m and self.clock.now_ms() - m[1] <= 60_000:
+            return m[0]
+        return self.mark(symbol)
 
     async def refresh_universe(self, size: int = 30, force: bool = False) -> None:
         if not force and time.time() - self.last_universe < 3600 and self.universe:

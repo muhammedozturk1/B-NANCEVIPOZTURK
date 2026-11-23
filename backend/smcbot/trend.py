@@ -15,6 +15,7 @@ import math
 
 import numpy as np
 
+from . import exits as X
 from .smc import Candles, atr
 from .strategy import Signal, fmt_price, n
 
@@ -35,13 +36,81 @@ def fng_label(v: int | None) -> str:
     return "aşırı açgözlülük"
 
 
+def fng_effective(fng: int | None, s: dict) -> tuple[int | None, str | None]:
+    """F&G değeri alınamadıysa ayara göre davran: allow (filtre yok) | skip (işlem açma) | neutral_fallback (50 say)."""
+    if fng is not None:
+        return fng, None
+    mode = s.get("fng_missing", "allow")
+    if mode == "skip":
+        return None, "Korku endeksi alınamadı (ayar: veri yoksa işlem açma)"
+    if mode == "neutral_fallback":
+        return 50, None
+    return None, None
+
+
 def fng_blocks(side: str, fng: int | None, s: dict) -> str | None:
-    if not s.get("fng_filter", True) or fng is None:
+    if not s.get("fng_filter", True):
         return None
-    if side == "LONG" and fng >= 75:
-        return f"Aşırı açgözlülükte ({fng}) long açılmaz"
-    if side == "SHORT" and fng <= 25:
-        return f"Aşırı korkuda ({fng}) short açılmaz"
+    v, why = fng_effective(fng, s)
+    if why:
+        return why
+    if v is None:
+        return None
+    hi_long, lo_long = float(s.get("fng_long_max", 75)), float(s.get("fng_long_min", 0))
+    lo_short, hi_short = float(s.get("fng_short_min", 25)), float(s.get("fng_short_max", 100))
+    if side == "LONG" and v >= hi_long:
+        return f"Aşırı açgözlülükte ({v}) long açılmaz"
+    if side == "LONG" and v < lo_long:
+        return f"Korku endeksi {v} < {lo_long:g}: long açılmaz (sahte kırılım riski)"
+    if side == "SHORT" and v <= lo_short:
+        return f"Aşırı korkuda ({v}) short açılmaz"
+    if side == "SHORT" and v > hi_short:
+        return f"Korku endeksi {v} > {hi_short:g}: short açılmaz"
+    return None
+
+
+def exit_summary(s: dict) -> str:
+    """Çıkış ayarlarının panelde okunacak özeti."""
+    try:
+        cfg = X.ExitConfig.from_settings(s)
+    except ValueError:
+        return "Çıkış ayarları hatalı"
+    parts = []
+    if cfg.lock_tiers:
+        parts.append("kâr kilidi " + ", ".join(f"+{a:g}R→{b:+g}R" for a, b in cfg.lock_tiers))
+    if cfg.partial_tiers:
+        parts.append("kısmi TP " + ", ".join(f"+{a:g}R'de %{b * 100:.0f}" for a, b in cfg.partial_tiers))
+    tm = {"off": "trailing kapalı", "swing": f"swing trailing (son {cfg.trail_swing_n} mum)",
+          "atr": f"ATR trailing ({cfg.trail_atr_mult:g}×)", "both": f"swing + {cfg.trail_atr_mult:g}×ATR trailing"}[cfg.trail_mode]
+    if cfg.trail_mode != "off" and cfg.trail_activate_r > -1:
+        tm += f", +{cfg.trail_activate_r:g}R sonrası"
+    parts.append(tm + f", {cfg.manage_tf} kapanışlarında")
+    return "Hedef yok; çıkış: " + "; ".join(parts) + f" (tetik: {cfg.trigger_source})"
+
+
+def bar_metrics(c: Candles, t: int) -> dict:
+    """Kırılım mumunun ölçüleri (aynalanmış mumda short için de doğru yönde)."""
+    o, h, lo, cl = float(c.open[t]), float(c.high[t]), float(c.low[t]), float(c.close[t])
+    rng = h - lo
+    base = c.volume[max(0, t - 20):t]
+    vr = float(c.volume[t] / base.mean()) if len(base) and base.mean() > 0 else 0.0
+    return {"volume_ratio": vr,
+            "body_ratio": abs(cl - o) / rng if rng > 0 else 0.0,
+            "close_strength": (cl - lo) / rng if rng > 0 else 0.0}
+
+
+def regime_block(side: str, c: Candles, t: int, s: dict, fng: int | None) -> str | None:
+    """Rejim filtreleri; her biri ayardan ayrı ayrı açılıp kapanır. Engel varsa nedenini döner."""
+    why = fng_blocks(side, fng, s)
+    if why:
+        return why
+    m = bar_metrics(c, t)
+    if s.get("filter_volume") and m["volume_ratio"] < float(s.get("min_volume_ratio", 1.2)):
+        return f"Hacim zayıf ({m['volume_ratio']:.2f}× < {float(s.get('min_volume_ratio', 1.2)):g}×)"
+    if s.get("filter_body") and m["body_ratio"] < float(s.get("min_body_ratio", 0.5)):
+        return f"Mum gövdesi küçük ({m['body_ratio']:.2f} < {float(s.get('min_body_ratio', 0.5)):g})"
+    if s.get("filter_close_strength") and m["close_strength"] < float(s.get("min_close_strength", 0.6)):
+        return f"Kapanış zayıf (mumun {m['close_strength']:.2f} seviyesinde < {float(s.get('min_close_strength', 0.6)):g})"
     return None
 
 
@@ -82,8 +151,7 @@ def evaluate(symbol: str, c4: Candles, s: dict, fng: int | None) -> tuple[list[S
                                            f"{word[1]} kapandı ({fmt_price(px(close))}): {word[2]} yönlü trend başlangıcı"},
             {"ok": True, "pts": 0, "text": f"Başlangıç stopu {n(k_atr)}×ATR uzakta ({fmt_price(px(stop))}, %{n(stop_pct)}): "
                                            f"normal dalgalanmada patlamayacak kadar geniş"},
-            {"ok": True, "pts": 0, "text": f"Hedef yok: stop her 4 saatte son {int(s['trend_exit_n'])} mumun "
-                                           f"{'dibine' if side == 'LONG' else 'tepesine'} çekilir, trend sürdükçe pozisyon açık kalır"},
+            {"ok": True, "pts": 0, "text": exit_summary(s)},
             {"ok": None, "pts": 0, "text": f"Korku & Açgözlülük endeksi: {fng if fng is not None else '—'} ({fng_label(fng)})"},
             {"ok": None, "pts": 0, "text": f"Kırılım mumunun hacmi 20 mumluk ortalamanın {n(vr)} katı (bilgi amaçlı)"},
         ]
@@ -97,7 +165,8 @@ def evaluate(symbol: str, c4: Candles, s: dict, fng: int | None) -> tuple[list[S
                          "breakout": {"price": px(level), "time": int(c4.time[t]), "from_time": int(c4.time[t - N])},
                          "init_stop": px(stop), "atr": a, "fng": fng, "volume_ratio": vr},
         )
-        blocked = fng_blocks(side, fng, s)
+        sig.annotations.update(bar_metrics(c, t))
+        blocked = regime_block(side, c, t, s, fng)
         if blocked:
             cands.append({"symbol": symbol, "side": side, "status": f"Engellendi: {blocked}", "level": px(level),
                           "close": px(close), "reasons": [r["text"] for r in reasons[:2]]})
@@ -118,14 +187,39 @@ def new_trail_stop(t: dict, c4: Candles, exit_n: int) -> float | None:
 
 
 # ---------------------------------------------------------------- geçmiş test
-def simulate(symbol: str, c4: Candles, s: dict, start_ms: int, fng_by_day: dict[int, int] | None = None) -> list[dict]:
-    """Canlı kuralların aynısı: kapanışta giriş (sonraki açılış), 3xATR stop, iz süren stop, F&G engeli."""
-    N, k_atr, exit_n = int(s["trend_n"]), float(s["trend_stop_atr"]), int(s["trend_exit_n"])
+def _funding_arrays(funding) -> tuple[np.ndarray, np.ndarray]:
+    if funding is None:
+        return np.zeros(0, dtype=np.int64), np.zeros(0)
+    if isinstance(funding, dict):
+        ks = sorted(funding)
+        return np.asarray(ks, dtype=np.int64), np.asarray([funding[k] for k in ks], dtype=float)
+    t, r = funding
+    return np.asarray(t, dtype=np.int64), np.asarray(r, dtype=float)
+
+
+def simulate(symbol: str, c4: Candles, s: dict, start_ms: int, fng_by_day: dict[int, int] | None = None,
+             c1: Candles | None = None, funding=None, exit_cfg: X.ExitConfig | None = None) -> list[dict]:
+    """Canlı kuralların aynısı (exits.py ortak motor). Look-ahead yok:
+    - sinyal 4s KAPANIŞINDA, giriş bir sonraki mumun açılışında (+kayma)
+    - trailing yalnızca kapanmış mumlarla, bir sonraki mumdan itibaren geçerli
+    Aynı mumda kötü sıra varsayımı:
+    - önce stop kontrol edilir (mum stopun ötesinde açıldıysa çıkış AÇILIŞTAN); stop olduysa o mumda kâr kilidi/TP yok
+    - mum içi tetikte (mark/last) önce tepe görülür, ardından dip yeni kilit stopuna değiyorsa çıkış kilit stopundan
+    Maliyet: giriş, her kısmi ve son çıkışta taker komisyonu + kayma; gerçek funding (varsa).
+    c1: daha ince mumlar (ör. 1s). Verilmezse 4s mumlar kullanılır (mum içi sıra daha belirsiz)."""
+    N, k_atr = int(s["trend_n"]), float(s["trend_stop_atr"])
+    cfg = exit_cfg or X.ExitConfig.from_settings(s)
     fee, slip = s["taker_fee_pct"] / 100, s["slippage_pct"] / 100
+    manage_ms = {"1h": 3_600_000, "4h": H4}[cfg.manage_tf]
+    f_t, f_r = _funding_arrays(funding)
+    intrabar = cfg.trigger_source != "candle_close"
     out: list[dict] = []
-    for side, c in (("LONG", c4), ("SHORT", c4.mirror())):
+    for side, c, sub in (("LONG", c4, c1 or c4), ("SHORT", c4.mirror(), (c1 or c4).mirror())):
+        d_real = 1 if side == "LONG" else -1
         px = (lambda v: -v) if c.mirrored else (lambda v: v)  # noqa: E731
         a_arr = atr(c)
+        close4 = c.time + H4
+        sub_close = sub.time + sub.interval_ms
         i = N + 20
         while i < len(c) - 1:
             if c.time[i] < start_ms or not np.isfinite(a_arr[i]):
@@ -135,46 +229,121 @@ def simulate(symbol: str, c4: Candles, s: dict, start_ms: int, fng_by_day: dict[
             if c.close[i] <= level:
                 i += 1
                 continue
-            fng = None
-            if fng_by_day:
-                fng = fng_by_day.get(int(c.time[i] + H4) // 86_400_000)
-            if fng_blocks(side, fng, s):
+            fng = fng_by_day.get(int(c.time[i] + H4) // 86_400_000) if fng_by_day else None
+            if regime_block(side, c, i, s, fng):
                 i += 1
                 continue
-            e = c.open[i + 1] + abs(c.open[i + 1]) * slip
+            j = int(np.searchsorted(sub.time, close4[i]))
+            if j >= len(sub) or sub.time[j] - close4[i] > sub.interval_ms:
+                i += 1
+                continue
+            j0 = j
+            e = sub.open[j] + abs(sub.open[j]) * slip
             stop = c.close[i] - k_atr * a_arr[i]
-            risk = e - stop
-            if risk <= 0:
+            if e - stop <= 0:
                 i += 1
                 continue
-            sl = stop
-            k = i + 1
-            ex = None
+            st = X.ExitState.new("LONG", float(e), float(stop))  # aynalanmış uzayda her şey LONG
+            frac = 1.0
+            fills: list[tuple[float, float, str]] = []           # (oran, fiyat, neden)
+            fund_r = 0.0
             mfe = mae = 0.0
-            while k < len(c):
-                mfe = max(mfe, (c.high[k] - e) / risk)
-                mae = max(mae, (e - c.low[k]) / risk)
-                if c.low[k] <= sl:
-                    ex = sl - abs(sl) * slip
+            ex = None
+            reason = ""
+            moves = 0
+            while j < len(sub):
+                o, h, lo, cl = sub.open[j], sub.high[j], sub.low[j], sub.close[j]
+                mfe = max(mfe, (h - e) / st.one_r)
+                mae = max(mae, (e - lo) / st.one_r)
+                # 1) önce stop (kötü sıra)
+                if o <= st.stop:
+                    ex, reason = o - abs(o) * slip, "gap"
+                elif lo <= st.stop:
+                    ex, reason = st.stop - abs(st.stop) * slip, "stop"
+                if ex is not None:
                     break
-                if k >= exit_n:
-                    sl = max(sl, c.low[k - exit_n + 1:k + 1].min())
-                k += 1
-            reason = "İz süren stop" if ex is not None and sl > e else "Stop"
+                # 2) mum içi tetik (mark/last): tepe önce, sonra dip
+                if intrabar:
+                    plan = X.on_trigger(st, cfg, float(h))
+                    for idx, fr in plan.partials:
+                        trig_px = st.price_at(cfg.partial_tiers[idx][0])
+                        fp = max(o, trig_px)
+                        fills.append((fr, fp - abs(fp) * slip, f"TP{idx + 1}"))
+                        frac -= fr
+                        st.partials_done.append(idx)
+                    if plan.stop is not None:
+                        X.apply_stop(st, plan.stop, plan.stop_source)
+                        moves += 1
+                        if lo <= st.stop:
+                            ex, reason = st.stop - abs(st.stop) * slip, "lock_same_bar"
+                            break
+                    if frac <= 1e-9:
+                        ex, reason = fills[-1][1], "all_partial"
+                        break
+                t_close = int(sub_close[j])
+                if t_close % manage_ms == 0:
+                    # 3) mum kapanışı tetiği
+                    if not intrabar:
+                        plan = X.on_trigger(st, cfg, float(cl))
+                        for idx, fr in plan.partials:
+                            fills.append((fr, cl - abs(cl) * slip, f"TP{idx + 1}"))
+                            frac -= fr
+                            st.partials_done.append(idx)
+                        if frac <= 1e-9:
+                            ex, reason = fills[-1][1], "all_partial"
+                            break
+                        if plan.stop is not None:
+                            if plan.exit_now:
+                                ex, reason = cl - abs(cl) * slip, "lock_close"
+                                break
+                            X.apply_stop(st, plan.stop, plan.stop_source)
+                            moves += 1
+                    # 4) trailing (sadece kapanmış 4s mumlar)
+                    k4 = int(np.searchsorted(close4, t_close, side="right")) - 1
+                    if k4 >= 0:
+                        n_sw = cfg.trail_swing_n
+                        cands = X.trail_candidates(st, cfg, float(cl), float(a_arr[k4]),
+                                                   c.low[max(0, k4 - n_sw + 1):k4 + 1], c.high[max(0, k4 - n_sw + 1):k4 + 1])
+                        new, src = X.choose_stop(st, cands)
+                        if new is not None:
+                            if new >= cl:
+                                ex, reason = cl - abs(cl) * slip, "trail_close"
+                                break
+                            X.apply_stop(st, new, src)
+                            moves += 1
+                # 5) funding (pozisyon açıkken geçen funding anları)
+                if len(f_t):
+                    a_, b_ = np.searchsorted(f_t, [int(sub.time[j]) + 1, t_close + 1])
+                    for q in range(a_, b_):
+                        fund_r += f_r[q] * abs(cl) * frac * d_real / st.one_r
+                j += 1
             if ex is None:
-                k = len(c) - 1
-                ex = c.close[k]
-                reason = "Test sonu (açık)"
-            r = ((ex - e) - (abs(e) + abs(ex)) * fee) / risk
+                j = len(sub) - 1
+                ex, reason = sub.close[j], "end"
+            fills.append((frac, float(ex), reason))
+            gross = sum(fr * (p - e) for fr, p, _ in fills)
+            fees = (abs(e) + sum(fr * abs(p) for fr, p, _ in fills)) * fee
+            r = (gross - fees) / st.one_r - fund_r
+            last_reason = {"end": "Test sonu (açık)", "all_partial": "Kısmi TP'lerle tamamen kapandı",
+                           "lock_close": "Kâr kilidi (kapanışta)", "trail_close": "İz süren stop (kapanışta)"}.get(reason)
+            if last_reason is None:
+                last_reason = ("Stop" if st.stop_source == "initial" else
+                               "Kâr kilidi stopu" if st.stop_source.startswith("kâr") else "İz süren stop")
+                if reason == "gap":
+                    last_reason += " (mum stopun ötesinde açıldı)"
+            exit_close = int(sub_close[j])
             out.append({
                 "symbol": symbol, "side": side, "status": "closed", "score": None,
-                "setup_time": int(c.time[i]) + H4, "entry_time": int(c.time[i + 1]), "exit_time": int(c.time[k]) + H4,
-                "entry_price": px(e), "exit_price": px(ex), "sl": px(sl), "sl_initial": px(stop), "tp1": None, "tp2": None,
-                "tp1_hit": 0, "r_multiple": r, "fee_r": (abs(e) + abs(ex)) * fee / risk, "exit_reason": reason,
-                "mfe": mfe, "mae": mae,
+                "setup_time": int(close4[i]), "entry_time": int(sub.time[j0]),
+                "exit_time": exit_close,
+                "entry_price": px(e), "exit_price": px(float(ex)), "sl": px(st.stop), "sl_initial": px(stop), "tp1": None, "tp2": None,
+                "tp1_hit": int(bool(st.partials_done)), "r_multiple": r, "fee_r": fees / st.one_r, "funding_r": fund_r,
+                "exit_reason": last_reason, "mfe": mfe, "mae": mae, "best_r": st.best_r, "stop_moves": moves,
+                "partials": [{"tier": nm, "frac": fr, "price": px(p)} for fr, p, nm in fills[:-1]],
                 "reasons": [{"ok": True, "pts": 0, "text": f"4s kırılım: son {N} mum seviyesi {fmt_price(px(level))}"}],
                 "annotations": {"tf": "4h", "strategy": "trend", "init_stop": px(stop),
                                 "breakout": {"price": px(level), "time": int(c.time[i]), "from_time": int(c.time[i - N])}},
             })
-            i = k + 1
+            i = int(np.searchsorted(close4, exit_close, side="right"))
+            i = max(i, N + 20)
     return out

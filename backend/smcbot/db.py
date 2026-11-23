@@ -118,6 +118,15 @@ def _clamp(st: dict) -> dict:
         if isinstance(st.get(k), (int, float)) and not isinstance(st.get(k), bool):
             st[k] = type(st[k])(min(hi, max(lo, st[k])))
     st["max_same_direction"] = min(int(st["max_same_direction"]), int(st["max_open_positions"]))
+    for k, opts in config.SETTING_CHOICES.items():
+        if st.get(k) not in opts:
+            st[k] = config.DEFAULT_SETTINGS[k]
+    from . import exits  # döngüsel içe aktarmayı önlemek için burada
+    for k, frac in (("lock_tiers", False), ("partial_tp_tiers", True)):
+        try:
+            exits.parse_tiers(st.get(k), frac=frac)
+        except (ValueError, TypeError):
+            st[k] = config.DEFAULT_SETTINGS[k]  # hatalı kademe metni kaydedilmez
     return st
 
 

@@ -6,6 +6,8 @@ Bu yüzden boyut stop mesafesinden hesaplanır.
 """
 from __future__ import annotations
 
+import numpy as np
+
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -145,6 +147,51 @@ class RiskGuard:
         if any(t["symbol"] == symbol for t in active):
             return False, "Bu coinde zaten pozisyon var"
         return True, ""
+
+
+# ---------------------------------------------------------------------------
+# Korelasyon sınırı
+# ---------------------------------------------------------------------------
+def log_returns(times, closes) -> dict[int, float]:
+    """Kapanmış mumlardan zaman -> log getiri (hizalama için zaman anahtarlı)."""
+    t = np.asarray(times, dtype=np.int64)
+    c = np.asarray(closes, dtype=float)
+    if len(c) < 2:
+        return {}
+    r = np.diff(np.log(np.abs(c)))
+    return dict(zip(t[1:].tolist(), r.tolist()))
+
+
+def correlation(ra: dict[int, float], rb: dict[int, float], lookback: int, until_ms: int | None = None) -> float | None:
+    """İki coinin ortak zamanlardaki son `lookback` getirisi arasındaki Pearson korelasyonu (yetersiz veri: None)."""
+    common = sorted(k for k in ra.keys() & rb.keys() if until_ms is None or k < until_ms)[-lookback:]
+    if len(common) < max(10, lookback // 2):
+        return None
+    a = np.array([ra[k] for k in common])
+    b = np.array([rb[k] for k in common])
+    if a.std() == 0 or b.std() == 0:
+        return None
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def correlation_block(symbol: str, side: str, open_trades: list[dict], returns_of, s: dict,
+                      until_ms: int | None = None) -> str | None:
+    """Aynı yöndeki açık pozisyonlardan biriyle korelasyon max_correlation'ı aşıyorsa engel nedeni döner.
+    returns_of(sym) -> {zaman: getiri} | None. Veri yoksa engellemez (kayıt düşülür)."""
+    if not s.get("filter_correlation"):
+        return None
+    lim, lb = float(s.get("max_correlation", 0.8)), int(s.get("corr_lookback", 60))
+    ra = returns_of(symbol)
+    if not ra:
+        return None
+    for t in open_trades:
+        if t["side"] != side or t["symbol"] == symbol:
+            continue
+        rb = returns_of(t["symbol"])
+        c = correlation(ra, rb, lb, until_ms) if rb else None
+        if c is not None and c >= lim:
+            return f"{t['symbol']} ile korelasyon {c:.2f} ≥ {lim:g} (aynı yönde)"
+    return None
 
 
 # ---------------------------------------------------------------------------

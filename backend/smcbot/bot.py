@@ -12,12 +12,12 @@ from collections import deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from . import backtest, coinglass, config, db, fng, telegram, trend
+from . import backtest, coinglass, config, db, exits as X, fng, telegram, trend
 from .binance_client import BinanceError, BinanceREST
 from .brokers import LiveBroker, PaperBroker
 from .config import INTERVAL_MS
 from .market import MarketData
-from .risk import RiskGuard, compute_stats, size_position
+from .risk import RiskGuard, compute_stats, correlation_block, log_returns, size_position
 from .strategy import SymbolAnalyzer, fmt_price
 
 TZ_TR = ZoneInfo("Europe/Istanbul")
@@ -27,6 +27,10 @@ LEASE = "main"
 LEASE_TTL_MS = 20_000
 NOT_LEADER = ("Bot şu an Render'daki diğer kopyada çalışıyor (yeni sürüm yayına alınıyor). "
               "Birkaç saniye sonra tekrar dene.")
+
+
+def _cap(x: str) -> str:
+    return x[:1].upper() + x[1:]
 
 
 def _dir(side: str) -> int:
@@ -58,6 +62,10 @@ class Bot:
         self.is_leader = False
         self._bg: set[asyncio.Task] = set()
         self.fng_value: int | None = None
+        self._last_manage_bucket = None
+        self._busy: set[int] = set()        # aynı işlem için aynı anda iki çıkış eylemi yapılmasın
+        self._retry_at: dict[int, float] = {}  # reddedilen emirler için bekleme (sn)
+        self._last_recover = 0.0
 
     # ------------------------------------------------------------------ yardımcılar
     @property
@@ -196,6 +204,7 @@ class Bot:
             self.log("error", f"Binance hesap kontrolü: {err}")
         else:
             self.log("info", f"Binance {MODE_TR[mode]} hesabına bağlanıldı")
+            await self._recover()
 
     # ------------------------------------------------------------------ bakiye
     async def balance(self) -> float:
@@ -249,6 +258,13 @@ class Bot:
         if self.broker is None or (isinstance(self.broker, LiveBroker) and self.live_error):
             self.scan_info["status"] = "Hesap/bağlantı sorunu: " + (self.live_error or "işlem motoru hazır değil")
             return
+        if self.settings.get("strategy") == "trend" and self.settings.get("manage_tf") == "1h":
+            hb = now // INTERVAL_MS["1h"]
+            if hb != self._last_manage_bucket and (self.sim or now % INTERVAL_MS["1h"] >= 3000):
+                first = self._last_manage_bucket is None
+                self._last_manage_bucket = hb
+                if not first:
+                    await self.manage_trend_bars()
         if bucket == self._last_bucket:
             return
         if not self.sim and now % ims < 3000 and self._last_bucket is not None:
@@ -330,12 +346,26 @@ class Bot:
 
         await asyncio.gather(*(one(x) for x in syms))
         async with self.lock:
-            for t in self.open_trades():
-                if (t.get("meta") or {}).get("exit_mode") != "trail":
-                    continue
-                c4 = c4cache.get(t["symbol"]) or await self.md.candles(t["symbol"], "4h", 120)
-                if c4 is not None:
-                    await self._trail_update(t, c4)
+            if s.get("manage_tf", "4h") == "4h":
+                for t in self.open_trades():
+                    if (t.get("meta") or {}).get("exit_mode") != "trail":
+                        continue
+                    c4 = c4cache.get(t["symbol"]) or await self.md.candles(t["symbol"], "4h", 120)
+                    if c4 is not None:
+                        await self._manage_bar(t, c4)
+            rets: dict = {}
+
+            def returns_of(sym: str):
+                if sym not in rets:
+                    c = c4cache.get(sym)
+                    rets[sym] = log_returns(c.time + INTERVAL_MS["4h"], c.close) if c is not None else None
+                return rets[sym]
+
+            for t in self.open_trades():  # korelasyon için açık pozisyonların mumları
+                if s.get("filter_correlation") and t["symbol"] not in c4cache:
+                    c4 = await self.md.candles(t["symbol"], "4h", 120)
+                    if c4 is not None:
+                        c4cache[t["symbol"]] = c4
             for c in cands:
                 self._candidate_raw(c)
             now = self.now()
@@ -355,7 +385,15 @@ class Bot:
                     self.seen_keys.add(sig.key)
                     why = "geç kalındı (bot yeni başladı)"
                 else:
-                    why = await self._register_signal(sig)
+                    why = None
+                    if sig.key not in self.seen_keys:
+                        cb = correlation_block(sig.symbol, sig.side, self.open_trades(), returns_of, s)
+                        if cb:
+                            self.seen_keys.add(sig.key)
+                            self._candidate(sig, f"Atlandı: {cb}")
+                            why = "korelasyon sınırı"
+                    if why is None:
+                        why = await self._register_signal(sig)
                 if why is None:
                     opened += 1
                 elif why != "daha önce görüldü":
@@ -371,25 +409,191 @@ class Bot:
         self.log("info", f"4s tarama: {len(syms)} coin, {len(found)} kırılım, korku endeksi "
                          f"{self.fng_value if self.fng_value is not None else '—'} ({dt:.1f} sn)")
 
+    # ------------------------------------------------------------------ trend çıkış yönetimi (exits.py)
+    def exit_cfg(self) -> X.ExitConfig:
+        return X.ExitConfig.from_settings(self.settings)
+
+    @staticmethod
+    def _exit_state(t: dict) -> X.ExitState:
+        """İşlemin çıkış durumu. Eski sürümde açılmış işlemlerde yoksa giriş + ilk stoptan kurulur (1R sabit)."""
+        meta = t.get("meta") or {}
+        if meta.get("exit"):
+            st = X.ExitState.from_dict(meta["exit"])
+            if t.get("sl") is not None and X.more_protective(st.side, float(t["sl"]), st.stop):
+                st.stop = float(t["sl"])  # DB'deki stop daha ileriyse onu esas al
+            return st
+        st = X.ExitState.new(t["side"], float(t["entry_price"]), float(t["sl_initial"] or t["sl"]))
+        st.stop = float(t["sl"])
+        return st
+
+    def _save_exit(self, t: dict, st: X.ExitState, **fields) -> dict:
+        meta = dict(fields.pop("meta", None) or t.get("meta") or {})
+        meta["exit"] = st.to_dict()
+        db.update_trade(t["id"], meta=meta, **fields)
+        t.update(fields, meta=meta)
+        return t
+
+    def _trigger_price(self, symbol: str, cfg: X.ExitConfig) -> float | None:
+        return self.md.last(symbol) if cfg.trigger_source == "last_price" else self.md.mark(symbol)
+
     async def _trail_update(self, t: dict, c4) -> None:
-        new = trend.new_trail_stop(t, c4, int(self.settings["trend_exit_n"]))
-        if new is None:
+        """Geriye uyumluluk: 4s mum kapanışında yönetim."""
+        await self._manage_bar(t, c4)
+
+    async def manage_trend_bars(self) -> None:
+        """manage_tf=1h: her saat kapanışında trend işlemlerinin trailing / kapanış tetiklerini çalıştır."""
+        async with self.lock:
+            for t in self.open_trades():
+                if (t.get("meta") or {}).get("exit_mode") != "trail":
+                    continue
+                c4 = await self.md.candles(t["symbol"], "4h", 120)
+                c1 = await self.md.candles(t["symbol"], "1h", 120)
+                if c4 is not None:
+                    await self._manage_bar(t, c4, c1)
+
+    async def _manage_bar(self, t: dict, c4, c1=None) -> None:
+        """Mum kapanışında: (candle_close ise) kilit/kısmi TP, ardından trailing. Sadece KAPANMIŞ mumlar kullanılır."""
+        if t["id"] in self._busy:
             return
+        cfg = self.exit_cfg()
         sym = self.md.symbols.get(t["symbol"])
-        if sym:
-            new = sym.round_price(new)
-            if new == t["sl"]:
+        tick = sym.tick if sym else None
+        st = self._exit_state(t)
+        ref = c1 if (cfg.manage_tf == "1h" and c1 is not None) else c4
+        close = float(ref.close[-1])
+        lock: dict = {}
+        if cfg.trigger_source == "candle_close":
+            plan = X.on_trigger(st, cfg, close, tick)
+            if plan.stop is not None:
+                lock[plan.stop_source] = plan.stop  # trailing adaylarıyla birlikte değerlendirilir (tek emir)
+            plan.stop = None
+            if await self._execute_plan(t, st, plan, close, "mum kapanışı"):
                 return
+            t = db.get_trade(t["id"]) or t
+            if t["status"] != "open":
+                return
+        else:
+            # mum içi tetikler tikte işlenir; burada sadece trailing aktivasyonu için en iyi R'yi kapanışla da güncelle
+            X.on_trigger(st, X.ExitConfig(trail_mode=cfg.trail_mode, trail_activate_r=cfg.trail_activate_r), close)
+        a = trend.atr(c4)
+        cands = X.trail_candidates(st, cfg, close, float(a[-1]), c4.low, c4.high)
+        cands.update(lock)
+        new, src = X.choose_stop(st, cands, tick)
+        if new is None:
+            self._save_exit(t, st)
+            return
+        await self._apply_stop(t, st, new, src)
+
+    async def _execute_plan(self, t: dict, st: X.ExitState, plan: X.Plan, price: float, why: str) -> bool:
+        """Plan uygula: önce kısmi TP'ler (her kademe bir kez), sonra stop. Dönüş: işlem kapandıysa True."""
+        cfg = self.exit_cfg()
+        for note in plan.notes:
+            self.log("info", f"#{t['id']} {t['symbol']} {note}")
+        for idx, fr in plan.partials:
+            if await self._do_partial(t, st, idx, fr, price, cfg):
+                return True
+            t = db.get_trade(t["id"]) or t
+        if plan.stop is not None:
+            if plan.exit_now:
+                await self._close(t, price, "sl", f"{_cap(plan.stop_source)} (fiyat seviyenin ötesinde, {why})")
+                return True
+            await self._apply_stop(t, st, plan.stop, plan.stop_source)
+        elif plan.notes or plan.partials:
+            self._save_exit(t, st)
+        return False
+
+    async def _apply_stop(self, t: dict, st: X.ExitState, new: float, src: str) -> bool:
+        """Stopu taşı: sadece koruma yönünde; borsada önce yeni stop, sonra eskinin iptali (brokers.move_stop).
+        Yeni stop fiyatın ötesindeyse (anında tetiklenirdi) pozisyon piyasa emriyle kapatılır."""
+        if not X.more_protective(st.side, new, st.stop):
+            return False  # geri gitme asla
+        mark = self.md.mark(t["symbol"])
+        if mark is not None and not X.more_protective(st.side, mark, new):
+            await self._close(t, mark, "sl", f"{_cap(src)} (fiyat seviyenin ötesinde, anında kapatıldı)")
+            return True
         meta = dict(t.get("meta") or {})
         if isinstance(self.broker, LiveBroker):
+            sym = self.md.symbols.get(t["symbol"])
             try:
                 meta.update(await self.broker.move_stop(dict(t, meta=meta), new, sym))
             except BinanceError as e:
-                self.log("error", f"#{t['id']} iz süren stop taşınamadı: {e} (eski stop yerinde)")
-                return
+                if e.code == -2021:  # emir anında tetiklenirdi: fiyat seviyeyi geçmiş
+                    await self._close(t, mark or new, "sl", f"{_cap(src)} (borsa: anında tetiklenirdi)")
+                    return True
+                self.log("error", f"#{t['id']} stop taşınamadı: {e} (eski stop yerinde, sonraki kapanışta tekrar)")
+                self._save_exit(t, st)
+                return False
+        old = st.stop
+        X.apply_stop(st, new, src)
         meta["trail"] = (meta.get("trail") or [])[-59:] + [[self.now(), new]]
-        db.update_trade(t["id"], sl=new, meta=meta)
-        self.log("info", f"#{t['id']} {t['symbol']} {t['side']} iz süren stop: {fmt_price(t['sl'])} → {fmt_price(new)}")
+        self._save_exit(t, st, sl=new, meta=meta)
+        self.log("info", f"#{t['id']} {t['symbol']} {t['side']} stop ({src}): {fmt_price(old)} → {fmt_price(new)}")
+        return False
+
+    async def _do_partial(self, t: dict, st: X.ExitState, idx: int, frac: float, price: float, cfg: X.ExitConfig) -> bool:
+        """Kısmi TP kademesi (bir kez). Emir kimliği kademeye bağlıdır (smc{id}p{idx}): tekrar gönderilse bile
+        borsada ikinci kez çalışmaz. Dönüş: işlem tamamen kapandıysa True."""
+        if idx in st.partials_done:
+            return False
+        if time.time() < self._retry_at.get(t["id"], 0):
+            return False
+        sym = self.md.symbols.get(t["symbol"])
+        meta = dict(t.get("meta") or {})
+        q0 = float(meta.get("qty_initial") or t.get("qty") or 0)
+        qty = sym.round_qty(q0 * frac) if sym else q0 * frac
+        open_q = float(t.get("qty_open") or 0)
+        rest = (sym.round_qty(open_q - qty) if sym else open_q - qty)
+        tier = cfg.partial_tiers[idx][0]
+        if sym and not sym.min_qty_ok(qty, price):
+            st.partials_done.append(idx)
+            self.log("warn", f"#{t['id']} TP{idx + 1} (+{tier:g}R) atlandı: miktar {qty:g} borsa minimumunun altında")
+            self._save_exit(t, st)
+            return False
+        if rest <= 0 or (sym and not sym.min_qty_ok(rest, price)):
+            await self._close(t, price, "market", f"TP{idx + 1} (+{tier:g}R): kalan miktar borsa minimumunun altında, tamamı kapatıldı")
+            return True
+        self._busy.add(t["id"])
+        try:
+            meta.setdefault("exit", st.to_dict())["pending_partial"] = idx  # yeniden başlatmada yarım kalan iş görünür
+            db.update_trade(t["id"], meta=meta)
+            res = await self.broker.reduce(dict(t, meta=meta), qty, price, "partial", sym, client_id=f"smc{t['id']}p{idx}")
+        except BinanceError as e:
+            self._retry_at[t["id"]] = time.time() + 30
+            self.log("error", f"#{t['id']} TP{idx + 1} kısmi kapatma reddedildi: {e} (30 sn sonra tekrar)")
+            return False
+        finally:
+            self._busy.discard(t["id"])
+        q = float(res.get("qty") or qty)
+        st.partials_done.append(idx)
+        meta.setdefault("partials", []).append({"time": self.now(), "price": res["price"], "qty": q, "tier": idx})
+        # borsa saati yerel saatten ileride olabilir: senkron bu dolumu "kapanış" sanmasın
+        meta["last_reduce_time"] = max(self.now(), int(res.get("time") or 0))
+        meta.setdefault("qty_initial", q0)
+        rest = (sym.round_qty(open_q - q) if sym else round(open_q - q, 8))
+        pnl_add = res["pnl"] - res["fee"]
+        ex = st.to_dict()
+        ex.pop("pending_partial", None)
+        meta["exit"] = ex
+        db.update_trade(t["id"], qty_open=rest, tp1_hit=1, pnl=(t["pnl"] or 0) + pnl_add,
+                        fees=(t["fees"] or 0) + res["fee"], meta=meta)
+        t.update(qty_open=rest, meta=meta, pnl=(t["pnl"] or 0) + pnl_add, fees=(t["fees"] or 0) + res["fee"])
+        self.log("info", f"#{t['id']} {t['symbol']} TP{idx + 1} (+{tier:g}R): {q:g} kapatıldı ({pnl_add:+.2f} USDT), kalan {rest:g}")
+        self.notify(telegram.msg_tp1(dict(t, tp1_close_pct=round(frac * 100)), self.mode, pnl_add))
+        return False
+
+    async def _recover(self) -> None:
+        """Gerçek/testnet: borsa ile DB mutabakatı (eksik stop yeniden konur, miktar eşitlenir, çift stop iptal)."""
+        if not isinstance(self.broker, LiveBroker):
+            return
+        self._last_recover = time.time()
+        try:
+            fixes = await self.broker.recover(self.open_trades(), self.md.symbols)
+        except BinanceError as e:
+            self.log("warn", f"Mutabakat yapılamadı: {e}")
+            return
+        for t, upd, note in fixes:
+            db.update_trade(t["id"], **upd)
+            self.log("warn", f"#{t['id']} {t['symbol']} mutabakat: {note}")
 
     async def _maybe_daily_summary(self, now: int) -> None:
         """Her gün 23:05'ten sonra (TR saati, 23:00 taramasının ardından) bir kez Telegram'a özet gönderir."""
@@ -562,6 +766,10 @@ class Bot:
         meta.update(fill.get("meta") or {})
         if sz["capped"]:
             meta["capped"] = True
+        if meta.get("exit_mode") == "trail":
+            # 1R = |gerçek giriş - ilk stop|; pozisyon boyunca sabit
+            meta["exit"] = X.ExitState.new(t["side"], entry, float(t["sl"])).to_dict()
+            meta["qty_initial"] = qty
         upd = dict(status="open", entry_time=self.now(), entry_price=entry, qty=qty, qty_open=qty,
                    notional=entry * qty, leverage=sz["leverage"], margin=entry * qty / sz["leverage"],
                    risk_amount=per_unit * qty, fees=fill["fee"], pnl=-fill["fee"], meta=meta)
@@ -585,10 +793,25 @@ class Bot:
             if r_now > (t.get("mfe") or 0) + 0.02 or -r_now > (t.get("mae") or 0) + 0.02:
                 db.update_trade(t["id"], mfe=max(t.get("mfe") or 0, r_now), mae=max(t.get("mae") or 0, -r_now))
             if (t.get("meta") or {}).get("exit_mode") == "trail":
-                # trend: hedef yok, sadece (iz süren) stop. Gerçek/testnette stop borsada bekler.
+                # trend: stop borsada bekler (demoda mark fiyatıyla kontrol). Kâr kilidi / kısmi TP tetik kaynağı ayardan.
                 if paper and ((mark <= t["sl"]) if L else (mark >= t["sl"])):
                     profit = (t["sl"] - t["entry_price"]) * d > 0
-                    await self._close(t, mark, "sl", "İz süren stop (kârda)" if profit else "Stop")
+                    src = ((t.get("meta") or {}).get("exit") or {}).get("stop_source", "")
+                    await self._close(t, mark, "sl", ("Kâr kilidi stopu" if src.startswith("kâr") else
+                                                      "İz süren stop (kârda)") if profit else "Stop")
+                    continue
+                cfg = self.exit_cfg()
+                if cfg.trigger_source != "candle_close" and t["id"] not in self._busy:
+                    px = self._trigger_price(t["symbol"], cfg)
+                    if px is not None:
+                        st = self._exit_state(t)
+                        before = (st.best_r, st.lock_r, st.trail_active)
+                        sym = self.md.symbols.get(t["symbol"])
+                        plan = X.on_trigger(st, cfg, px, sym.tick if sym else None)
+                        if plan.partials or plan.stop is not None:
+                            await self._execute_plan(t, st, plan, px, "tik")
+                        elif (st.lock_r, st.trail_active) != before[1:] or st.best_r >= before[0] + 0.1:
+                            self._save_exit(t, st)
                 continue
             hit_tp1 = not t["tp1_hit"] and ((mark >= t["tp1"]) if L else (mark <= t["tp1"]))
             if paper:
@@ -683,6 +906,8 @@ class Bot:
             if not opens:
                 return
             async with self.lock:
+                if time.time() - self._last_recover >= 60:
+                    await self._recover()  # eksik/çift stop, miktar farkı (kopma ve yeniden başlatma sonrası)
                 try:
                     closed = await self.broker.sync(self.open_trades())
                 except BinanceError as e:

@@ -1,5 +1,45 @@
 # Kripto Bot v4.3 — SMC Bot (4 saatlik trend takibi) + SMC Scalper (4s kırılım, %1 stop / %2 hedef)
 
+## v4.4 — Trend botu: çıkış motoru, stop güvenliği, rejim filtreleri
+
+Ayrıntılı karşılaştırma: `docs/TREND_CIKIS_RAPORU.md`. Yeniden üretmek için: `scripts/trend_compare/`.
+
+**Yeni modül `backend/smcbot/exits.py`.** Canlı bot ve geçmiş test aynı kodu kullanır.
+- 1R = |giriş − ilk stop|. Pozisyon boyunca sabittir.
+- Stop yalnızca koruma yönünde hareket eder. Adaylar ilk stop, kâr kilidi kademeleri, ATR trailing ve swing trailing'dir; en koruyucu olan seçilir.
+- Stop tick'e koruma yönünde yuvarlanır: LONG için yukarı, SHORT için aşağı.
+- Kâr kilidi kademeleri (`lock_tiers`) ve kısmi TP kademeleri (`partial_tp_tiers`, her kademe bir kez) ayarlanabilir.
+- Trailing için ayarlar: aktivasyon eşiği, ATR çarpanı, swing mum sayısı, güncelleme sıklığı (1s/4s).
+- Tetik kaynağı seçilebilir: `mark_price`, `last_price` veya `candle_close`.
+
+**Borsa güvenliği**
+- `move_stop`: eski stopun iptali başarısız olursa yeni stopun kimliği yine kaydedilir, eski stop sonra temizlenir.
+- Mutabakat (`recover`): başlangıçta ve her 60 sn'de çalışır.
+  - Borsada stop yoksa yeniden koyar.
+  - Çift stopları iptal eder.
+  - Miktarı borsaya eşitler.
+- Kısmi kapatma reduceOnly'dir ve emir kimliği kademeye bağlıdır (`smc{id}p{n}`). Aynı kimlik tekrar gönderilirse borsadaki emir okunur, iki kez kapatılmaz.
+- minQty ve minNotional kontrolü yapılır.
+- Fiyat yeni stopu çoktan geçmişse pozisyon hemen kapatılır.
+
+**Rejim filtreleri** (her biri ayrı açılıp kapanır)
+- F&G eşikleri ve veri yoksa davranış (`fng_missing`: allow / skip / neutral_fallback)
+- Hacim oranı
+- Gövde oranı
+- Kapanış gücü
+- Aynı yöndeki açık pozisyonlarla korelasyon sınırı
+
+**Geçmiş test**
+- 1s mumlarla mum içi yol takip edilir.
+- Aynı mumda kötü sıra varsayılır: önce stop; gap varsa çıkış açılış fiyatından.
+- Gerçek funding dahildir.
+
+**Sonuç (20 coin, 2020–2026, aynı maliyetler)**
+- Şartnamedeki sıkı kâr kilidi (1→0, 1,5→0,5, 2→1R, mark tetik) Net R'yi 594'ten 65'e düşürdü. Önceden yazılan hiçbir varyant IS'te eski kuralları geçemedi.
+- Varsayılan olarak eski çıkış ile +2R'de 4s kapanış tetikli başabaş kilidi gönderildi. Sonuçları eskiyle neredeyse aynı.
+- Filtreler varsayılan olarak kapalı.
+- Eski backtest funding'i saymadığı için iyimserdi (Net R 692 → 594).
+
 ## v4.3 — SMC Scalper: yeni strateji, süre kilidi kaldırıldı
 
 **İstek:** hızlı işlemler, stop = kasanın %1'i, kâr = kasanın %2'si, 100 USDT, işlem başı %1 risk.
