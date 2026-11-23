@@ -65,6 +65,27 @@ def init() -> None:
             for stmt in _schema():
                 c.execute(text(stmt))
         _ready = True
+    _migrate_risk_v441()
+
+
+RISK_TESTED = {"risk_per_trade_pct": 1.0, "max_open_positions": 3, "max_same_direction": 2, "daily_loss_limit_pct": 10.0}
+
+
+def _migrate_risk_v441() -> None:
+    """Bir kerelik: kayıtlı risk ayarlarını test edilen değerlere çeker (2020-2026 testi: %1 risk, en fazla 3
+    pozisyon, aynı yönde en fazla 2). Sadece test edilenden YÜKSEK olanlar düşürülür; daha temkinli ayarlara
+    dokunulmaz. Sonrasında panelden değiştirilebilir, bu işlem bir daha çalışmaz."""
+    if kv_get("migr:risk_v441"):
+        return
+    stored = kv_get("settings", {}) or {}
+    changed = {k: (stored[k], v) for k, v in RISK_TESTED.items() if k in stored and float(stored[k]) > v}
+    if changed:
+        stored.update({k: new for k, (_, new) in changed.items()})
+        kv_set("settings", stored)
+        add_log("warn", "Risk ayarları test edilen değerlere çekildi (bir kerelik, v4.4.1): "
+                        + ", ".join(f"{k} {old:g} → {new:g}" for k, (old, new) in changed.items())
+                        + ". Açık pozisyonlara dokunulmadı; yeni sınırlar yeni girişlere uygulanır.")
+    kv_set("migr:risk_v441", True)
 
 
 def _clean(v: Any) -> Any:

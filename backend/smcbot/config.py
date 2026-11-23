@@ -57,7 +57,7 @@ DEFAULT_SETTINGS: dict = {
     "paper_start_balance": 1000.0,
 
     # Risk
-    "risk_per_trade_pct": 5.0,       # stop olursa kaybedilecek bakiye yüzdesi
+    "risk_per_trade_pct": 1.0,       # stop olursa kaybedilecek bakiye yüzdesi (test edilen: %1)
     "leverage": 10,
     "max_open_positions": 3,
     "max_same_direction": 2,         # aynı yönde (hepsi long gibi) en fazla
