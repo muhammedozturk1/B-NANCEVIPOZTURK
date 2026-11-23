@@ -282,3 +282,19 @@ def test_daily_summary_sent_once_per_day(monkeypatch):
         await bot.md.rest.close()
 
     asyncio.run(scenario())
+
+
+def test_one_time_risk_migration_lowers_only_riskier_settings(monkeypatch):
+    """v4.4.1: kayıtlı riskli ayarlar bir kez test edilen değerlere çekilir; temkinli olanlara dokunulmaz,
+    sonrasında kullanıcı panelden tekrar değiştirebilir (migrasyon bir daha çalışmaz)."""
+    db.kv_set("settings", {"risk_per_trade_pct": 5.0, "max_open_positions": 10, "max_same_direction": 10,
+                           "daily_loss_limit_pct": 5.0})
+    db.kv_set("migr:risk_v441", None)
+    db._migrate_risk_v441()
+    st = db.get_settings()
+    assert (st["risk_per_trade_pct"], st["max_open_positions"], st["max_same_direction"]) == (1.0, 3, 2)
+    assert st["daily_loss_limit_pct"] == 5.0  # zaten daha temkinli
+    assert any("v4.4.1" in x["msg"] for x in db.get_logs())
+    db.save_settings({"risk_per_trade_pct": 2.0})
+    db._migrate_risk_v441()
+    assert db.get_settings()["risk_per_trade_pct"] == 2.0
