@@ -78,6 +78,29 @@ DEFAULT_SETTINGS: dict = {
                                      # çoğu zaman tek bir piyasa hareketidir; 2023-2026 testinde 1 en iyisi)
     "telegram_daily_summary": True,  # her gün 23:05'te (TR) Telegram'a günlük özet
 
+    # Trend çıkış yönetimi (exits.py; canlı ve geçmiş test aynı motoru kullanır). 1R = |giriş - ilk stop|, sabit.
+    # Varsayılanlar 2020-2026 / 20 coin karşılaştırmasına göre seçildi (docs/TREND_CIKIS_RAPORU.md):
+    # sıkı kâr kilitleri büyük trendleri erken kesip toplam getiriyi düşürdü; +2R'de başabaş neredeyse bedava.
+    "lock_tiers": "2.0:0",           # biçim "tetik_R:kilit_R" virgülle, örn. "1.0:0, 1.5:0.5, 2.0:1.0"; boş = kapalı
+    "lock_fee_cover": True,          # kilit seviyesine komisyon+kaymayı ekle (0R gerçekten ~0 olsun)
+    "partial_tp_tiers": "",          # biçim "tetik_R:oran" virgülle, örn. "2.0:0.33, 3.0:0.25" (ilk miktarın oranı); boş = kapalı
+    "exit_trigger_source": "candle_close",  # kilit/kısmi TP tetiği: mark_price | last_price | candle_close
+    "manage_tf": "4h",               # trailing güncelleme + candle_close tetik sıklığı: 1h | 4h
+    "trail_mode": "swing",           # off | swing (son M mumun dibi) | atr (kapanış - K×ATR) | both (en koruyucusu)
+    "trail_activate_r": -1.0,        # trailing bu R görülünce başlar; -1 = hemen (eski davranış)
+    "trail_atr_mult": 3.0,
+
+    # Rejim filtreleri (her biri ayrı açılır/kapanır)
+    "fng_missing": "allow",          # F&G alınamazsa: allow | skip | neutral_fallback (50 say)
+    "fng_long_max": 75,              # F&G >= bu değer: long açma (aşırı açgözlülük)
+    "fng_short_min": 25,             # F&G <= bu değer: short açma (aşırı korku)
+    "fng_long_min": 0,               # F&G < bu değer: long açma (0 = kapalı)
+    "fng_short_max": 100,            # F&G > bu değer: short açma (100 = kapalı)
+    "filter_volume": False, "min_volume_ratio": 1.2,          # kırılım mumu hacmi / 20 mum ortalaması
+    "filter_body": False, "min_body_ratio": 0.5,              # gövde / (tepe - dip)
+    "filter_close_strength": False, "min_close_strength": 0.6,  # kapanışın mum içindeki yeri (long: 1 = tepede)
+    "filter_correlation": False, "max_correlation": 0.8, "corr_lookback": 60,  # aynı yöndeki açık pozisyonlarla
+
     # SMC stratejisi
     "entry_mode": "ce",              # ce | edge | market
     "min_score": 65,
@@ -118,10 +141,22 @@ SETTING_LIMITS: dict = {
     "trend_stop_atr": (0.5, 10.0),
     "trend_exit_n": (2, 60),
     "trend_max_new_per_bar": (0, 10),     # 0 = sınırsız
+    "trail_activate_r": (-1.0, 10.0),
+    "trail_atr_mult": (0.5, 10.0),
+    "fng_long_max": (1, 101), "fng_short_min": (-1, 99), "fng_long_min": (0, 100), "fng_short_max": (0, 100),
+    "min_volume_ratio": (0.0, 10.0), "min_body_ratio": (0.0, 1.0), "min_close_strength": (0.0, 1.0),
+    "max_correlation": (0.0, 1.0), "corr_lookback": (10, 500),
     "universe_size": (1, 60),
     "taker_fee_pct": (0.0, 1.0),
     "slippage_pct": (0.0, 1.0),
     "live_unlock_min_trades": (1, 10_000),
+}
+
+SETTING_CHOICES: dict = {
+    "exit_trigger_source": ("mark_price", "last_price", "candle_close"),
+    "manage_tf": ("1h", "4h"),
+    "trail_mode": ("off", "swing", "atr", "both"),
+    "fng_missing": ("allow", "skip", "neutral_fallback"),
 }
 
 INTERVAL_MS = {

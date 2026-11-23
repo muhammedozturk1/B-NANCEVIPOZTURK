@@ -114,9 +114,11 @@ def test_bot_trend_trade_paper_end_to_end(monkeypatch):
         assert t["status"] == "open" and t["tp2"] is None
         # fiyat yükselir, yeni 4s mumlar kapanır: stop iz sürer
         c2 = candles(closes + [106 + 2 * i for i in range(20)], t0=t0)
+        bot.md.marks["TESTUSDT"] = (float(c2.close[-1]), bot.now())
         await bot._trail_update(t, c2)
         t = db.get_trade(t["id"])
         assert t["sl"] > t["entry_price"] and len(t["meta"]["trail"]) == 1
+        assert t["meta"]["exit"]["lock_r"] == 0.0 and t["meta"]["exit"]["stop_source"].startswith("swing")
         # hedefe değil, sadece stopa bakılır
         bot.md.marks["TESTUSDT"] = (200.0, bot.now())
         await bot._process_open()

@@ -533,6 +533,23 @@
       ["fng_filter", "Korku endeksi: aşırı açgözlülükte long, aşırı korkuda short açma", "check"],
       ["notify_setups", "Bulunan kurulumları da Telegram'a gönder", "check"],
       ["telegram_daily_summary", "Her gün 23:05'te Telegram'a günlük özet gönder", "check"]]],
+    ["Trend çıkış yönetimi (1R = giriş − ilk stop, sabit)", [
+      ["lock_tiers", "Kâr kilidi kademeleri (tetikR:kilitR, virgülle; boş = kapalı) örn. 1.0:0, 1.5:0.5, 2.0:1.0", "text"],
+      ["lock_fee_cover", "Kilit seviyesine komisyon + kaymayı ekle (0R gerçekten başabaş olsun)", "check"],
+      ["partial_tp_tiers", "Kısmi TP kademeleri (tetikR:oran, virgülle; boş = kapalı) örn. 2.0:0.33, 3.0:0.25", "text"],
+      ["exit_trigger_source", "Kilit / kısmi TP tetik fiyatı", { candle_close: "Mum kapanışı (önerilen)", mark_price: "Mark fiyatı (anlık)", last_price: "Son işlem fiyatı (anlık)" }],
+      ["manage_tf", "Trailing güncelleme sıklığı", { "4h": "4 saatte bir (önerilen)", "1h": "Saatte bir" }],
+      ["trail_mode", "Trailing türü", { swing: "Swing: son M mumun dibi/tepesi", atr: "ATR: kapanış − K×ATR", both: "İkisi (en koruyucusu)", off: "Kapalı" }],
+      ["trail_activate_r", "Trailing başlama eşiği (R; −1 = hemen)", 0.1], ["trail_atr_mult", "ATR trailing çarpanı (K)", 0.1]]],
+    ["Trend giriş filtreleri", [
+      ["fng_missing", "Korku endeksi alınamazsa", { allow: "Filtresiz devam et", skip: "İşlem açma", neutral_fallback: "50 (nötr) say" }],
+      ["fng_long_max", "Long açma: F&G bu değer ve üstündeyse", 1], ["fng_short_min", "Short açma: F&G bu değer ve altındaysa", 1],
+      ["fng_long_min", "Long açma: F&G bu değerin altındaysa (0 = kapalı)", 1], ["fng_short_max", "Short açma: F&G bu değerin üstündeyse (100 = kapalı)", 1],
+      ["filter_volume", "Hacim filtresi", "check"], ["min_volume_ratio", "Min. hacim / 20 mum ortalaması", 0.1],
+      ["filter_body", "Gövde oranı filtresi", "check"], ["min_body_ratio", "Min. gövde / mum boyu", 0.05],
+      ["filter_close_strength", "Kapanış gücü filtresi", "check"], ["min_close_strength", "Min. kapanış yeri (1 = tepede)", 0.05],
+      ["filter_correlation", "Korelasyon sınırı (aynı yöndeki açık pozisyonlarla)", "check"],
+      ["max_correlation", "Maks. korelasyon", 0.05], ["corr_lookback", "Korelasyon penceresi (4s mum)", 1]]],
     ["SMC stratejisi (eski)", [
       ["entry_mode", "Giriş yöntemi", { ce: "FVG ortası (CE)", edge: "FVG'ye ilk temas", market: "MSS kapanışında piyasa" }],
       ["ltf", "Giriş zaman dilimi", { "5m": "5 dakika", "15m": "15 dakika", "1h": "1 saat" }],
@@ -549,6 +566,7 @@
     try { settingsCache = await api("/api/settings"); } catch { return; }
     const st = settingsCache.settings;
     $("#setForm").innerHTML = GROUPS.map(([g, fields]) => `<fieldset><legend>${g}</legend>${fields.map(([k, label, kind]) => {
+      if (kind === "text") return `<label>${label}<input type="text" name="${k}" value="${esc(String(st[k] ?? ""))}"></label>`;
       if (kind === "check") return `<label class="check"><input type="checkbox" name="${k}" ${st[k] ? "checked" : ""}> ${label}</label>`;
       if (typeof kind === "object") return `<label>${label}<select name="${k}">${Object.entries(kind).map(([v, l]) => `<option value="${v}" ${String(st[k]) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>`;
       return `<label>${label}<input type="number" name="${k}" step="${kind}" value="${st[k]}"></label>`;
@@ -590,6 +608,12 @@
         if (typeof saved[i.name] === "number" && parseFloat(i.value) !== saved[i.name]) {
           i.value = saved[i.name];
           fixed.push(`${i.closest("label").firstChild.textContent.trim()}: ${saved[i.name]}`);
+        }
+      });
+      $$("#setForm input[type=text]").forEach(i => {
+        if (String(saved[i.name] ?? "") !== i.value.trim()) {
+          fixed.push(`${i.name}: hatalı yazım, "${saved[i.name]}" olarak bırakıldı`);
+          i.value = saved[i.name];
         }
       });
       if (fixed.length) setTimeout(() => toast("Geçerli aralığa çekildi — " + fixed.join(", ")), 1200);

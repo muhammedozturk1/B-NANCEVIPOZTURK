@@ -13,7 +13,7 @@ from typing import Callable
 
 from .binance_client import parse_klines
 from .config import INTERVAL_MS
-from .risk import compute_stats
+from .risk import compute_stats, correlation_block, log_returns
 from .smc import Candles
 from .strategy import SymbolAnalyzer
 
@@ -106,7 +106,7 @@ def simulate_symbol(symbol: str, ltf: Candles, htf: Candles, s: dict, start_ms: 
     return out
 
 
-def portfolio(trades: list[dict], s: dict, start_balance: float = 1000.0) -> dict:
+def portfolio(trades: list[dict], s: dict, start_balance: float = 1000.0, returns_of=None) -> dict:
     """Olay sıralı portföy: işlemler GİRİŞ zamanına göre işlenir; botun canlı kuralları uygulanır
     (en fazla N pozisyon, aynı yönde en fazla M, coin başına 1). Risk, giriş anındaki bakiyeden hesaplanır.
     (Eski sürüm çıkış zamanına göre sıralıyordu; uzun süren kazananları dışarıda bırakıyordu.)"""
@@ -135,6 +135,9 @@ def portfolio(trades: list[dict], s: dict, start_balance: float = 1000.0) -> dic
                 sum(1 for x in live if x["side"] == t["side"]) >= max_dir:
             continue
         if per_bar and bar_cnt.get(t["entry_time"], 0) >= per_bar:
+            continue
+        if returns_of is not None and correlation_block(t["symbol"], t["side"], live, returns_of, s,
+                                                        until_ms=t.get("setup_time")):
             continue
         bar_cnt[t["entry_time"]] = bar_cnt.get(t["entry_time"], 0) + 1
         risk_amt = bal * s["risk_per_trade_pct"] / 100
@@ -192,6 +195,7 @@ async def run_trend(md, s: dict, days: int, symbols: list[str], progress: Callab
     fng_hist = await fng.history(md.sim is not None) if s.get("fng_filter", True) else {}
     all_trades: list[dict] = []
     errors = []
+    rets: dict = {}
     for k, sym in enumerate(symbols):
         progress(k, len(symbols), sym)
         try:
@@ -199,11 +203,22 @@ async def run_trend(md, s: dict, days: int, symbols: list[str], progress: Callab
             if len(raw) < int(s["trend_n"]) + 30:
                 continue
             c4 = Candles.from_cols(parse_klines(raw), INTERVAL_MS["4h"])
-            all_trades += await asyncio.to_thread(trend.simulate, sym, c4, s, start, fng_hist)
+            rets[sym] = log_returns(c4.time + INTERVAL_MS["4h"], c4.close)
+            c1 = None
+            if s.get("manage_tf") == "1h" or s.get("exit_trigger_source") != "candle_close":
+                r1 = [x for x in await md.rest.klines_range(sym, "1h", start - warm, now) if int(x[6]) < now]
+                c1 = Candles.from_cols(parse_klines(r1), INTERVAL_MS["1h"]) if len(r1) > 50 else None
+            fund = None
+            try:
+                fr = await md.rest.funding_history(sym, start - warm, now)
+                fund = ([int(x["fundingTime"]) for x in fr], [float(x["fundingRate"]) for x in fr])
+            except Exception:  # noqa: BLE001  funding alınamazsa maliyetsiz devam (sonuçta belirtilir)
+                errors.append(f"{sym}: funding geçmişi alınamadı")
+            all_trades += await asyncio.to_thread(trend.simulate, sym, c4, s, start, fng_hist, c1, fund)
         except Exception as e:  # noqa: BLE001
             errors.append(f"{sym}: {e}")
     progress(len(symbols), len(symbols), "")
-    res = portfolio(all_trades, s)
+    res = portfolio(all_trades, s, returns_of=rets.get)
     res["errors"] = errors
     res["diag"] = {"signals": len(all_trades), "filled": len(all_trades)}
     res["params"] = {"days": days, "symbols": symbols, "min_score": None, "risk_pct": s["risk_per_trade_pct"],

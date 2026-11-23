@@ -16,7 +16,7 @@ import json
 import time
 import urllib.parse
 from dataclasses import dataclass
-from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
+from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Any, Awaitable, Callable
 
 import aiohttp
@@ -49,8 +49,9 @@ class SymbolInfo:
     min_notional: Decimal
 
     def round_price(self, price: float, mode: str = "nearest") -> float:
+        """mode: nearest | down | up. Stoplar için koruma yönü kullanılır (LONG up, SHORT down)."""
         d = Decimal(str(price))
-        rounding = ROUND_HALF_UP if mode == "nearest" else ROUND_DOWN
+        rounding = {"nearest": ROUND_HALF_UP, "up": ROUND_CEILING, "down": ROUND_FLOOR}.get(mode, ROUND_DOWN)
         q = (d / self.tick).quantize(Decimal(1), rounding=rounding) * self.tick
         return float(q)
 
@@ -62,8 +63,13 @@ class SymbolInfo:
             q = min(q, self.market_max_qty)
         return float(q)
 
-    def fmt_price(self, price: float) -> str:
-        return _fmt(Decimal(str(self.round_price(price))), self.tick)
+    def fmt_price(self, price: float, mode: str = "nearest") -> str:
+        return _fmt(Decimal(str(self.round_price(price, mode))), self.tick)
+
+    def min_qty_ok(self, qty: float, price: float) -> bool:
+        """Borsa minimumları: miktar >= minQty ve nominal >= minNotional."""
+        mq = max(self.min_qty, self.market_min_qty)
+        return qty > 0 and Decimal(str(qty)) >= mq and (self.min_notional <= 0 or qty * price >= float(self.min_notional))
 
     def fmt_qty(self, qty: float) -> str:
         return _fmt(Decimal(str(self.round_qty(qty))), max(self.step, self.market_step))
@@ -267,6 +273,25 @@ class BinanceREST:
 
     async def open_algo_orders(self, symbol: str | None = None) -> list[dict]:
         return await self._request("GET", "/fapi/v1/openAlgoOrders", {"symbol": symbol}, signed=True)
+
+    async def get_order(self, symbol: str, client_id: str) -> dict:
+        """İstemci kimliğiyle emir sorgula (aynı kısmi kapatmanın iki kez gönderilmesini önlemek için)."""
+        return await self._request("GET", "/fapi/v1/order", {"symbol": symbol, "origClientOrderId": client_id}, signed=True)
+
+    async def funding_history(self, symbol: str, start: int, end: int) -> list[dict]:
+        out: list[dict] = []
+        cur = start
+        while cur < end:
+            rows = await self._request("GET", "/fapi/v1/fundingRate",
+                                       {"symbol": symbol, "startTime": cur, "endTime": end, "limit": 1000})
+            if not rows:
+                break
+            out += rows
+            nxt = int(rows[-1]["fundingTime"]) + 1
+            if nxt <= cur or len(rows) < 1000:
+                break
+            cur = nxt
+        return out
 
     async def user_trades(self, symbol: str, start: int) -> list[dict]:
         return await self._request("GET", "/fapi/v1/userTrades", {"symbol": symbol, "startTime": start, "limit": 500}, signed=True)
