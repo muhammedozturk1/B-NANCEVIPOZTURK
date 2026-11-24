@@ -96,7 +96,7 @@ class SimREST:
     def __init__(self) -> None:
         speed = float(os.environ.get("SMCBOT_SIM_SPEED", "60"))
         self.clock = SimClock(speed)
-        start = self.clock.sim0 - 14 * 86_400_000
+        start = self.clock.sim0 - 40 * 86_400_000  # momentum için 30+ günlük 1s geçmiş
         self.series = {s: _Series(s, p, start, i + 7) for i, (s, p) in enumerate(SYMBOLS.items())}
         self.used_weight = 0
         self._liq_cursor = self.clock.now_ms()

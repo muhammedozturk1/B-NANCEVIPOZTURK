@@ -33,12 +33,14 @@ class MarketData:
         self.symbols: dict[str, SymbolInfo] = {}
         self.universe: list[str] = []
         self.marks: dict[str, tuple[float, int]] = {}
-        self.lasts: dict[str, tuple[float, int]] = {}   # son işlem fiyatı (!miniTicker@arr), tetik kaynağı last_price için
+        self.lasts: dict[str, tuple[float, int]] = {}
+        self.volumes: dict[str, float] = {}             # 24s USDT hacmi (momentum hacim filtresi)
+        self._last_volumes = 0.0   # son işlem fiyatı (!miniTicker@arr), tetik kaynağı last_price için
         self.funding: dict[str, tuple[float, int]] = {}
         self.liq = LiquidationTracker(self.clock.now_ms)
         self.stream: MarketStream | None = None
         self._stream_task: asyncio.Task | None = None
-        self._kcache: dict[tuple[str, str], tuple[int, dict]] = {}
+        self._kcache: dict[tuple[str, str, int], tuple[int, dict]] = {}
         self.geo_blocked = False
         self.last_error = ""
         self.last_universe = 0.0
@@ -146,6 +148,7 @@ class MarketData:
             if not self.symbols:
                 self.symbols = await self.rest.exchange_info()
             tick = await self.rest.ticker_24h()
+            self._store_volumes(tick)
             ranked = sorted(
                 (t for t in tick if t.get("symbol") in self.symbols
                  and self.symbols[t["symbol"]].base.upper() not in config.STABLE_BASES),
@@ -159,12 +162,30 @@ class MarketData:
             self._handle_error(e)
             self.log("warn", f"Coin listesi alınamadı: {e}")
 
+    def _store_volumes(self, tick: list[dict]) -> None:
+        for t in tick:
+            try:
+                self.volumes[t["symbol"]] = float(t.get("quoteVolume") or 0)
+            except (KeyError, TypeError, ValueError):
+                pass
+        self._last_volumes = time.time()
+
+    async def refresh_volumes(self, max_age: float = 600) -> None:
+        """24s hacimler (en fazla 10 dk eski). Alınamazsa eski değerler kalır; hiç yoksa filtre uygulanmaz."""
+        if time.time() - self._last_volumes < max_age and self.volumes:
+            return
+        try:
+            self._store_volumes(await self.rest.ticker_24h())
+        except BinanceError as e:
+            self._handle_error(e)
+            self.log("warn", f"24s hacimler alınamadı: {e}")
+
     async def candles(self, symbol: str, interval: str, limit: int = 300) -> Candles | None:
         """Sadece KAPANMIŞ mumlar (son oluşan mum atılır)."""
         ims = config.INTERVAL_MS[interval]
         now = self.clock.now_ms()
         bucket = now // ims
-        key = (symbol, interval)
+        key = (symbol, interval, limit)
         hit = self._kcache.get(key)
         if hit and hit[0] == bucket:
             cols = hit[1]

@@ -66,6 +66,23 @@ def init() -> None:
                 c.execute(text(stmt))
         _ready = True
     _migrate_risk_v441()
+    _migrate_strategy_v45()
+
+
+def _migrate_strategy_v45() -> None:
+    """Bir kerelik (v4.5): kurulu botun stratejisini momentum portföye geçirir (kullanıcı isteği).
+    Açık trend işlemleri kapanana kadar yönetilmeye devam eder. Sonradan panelden değiştirilebilir."""
+    if kv_get("migr:strategy_v45"):
+        return
+    stored = kv_get("settings", None)
+    if stored:  # yalnız mevcut kurulumlarda (yeni kurulum varsayılanla başlar)
+        old = stored.get("strategy", "trend")
+        if old != "momentum":
+            stored["strategy"] = "momentum"
+            kv_set("settings", stored)
+            add_log("warn", f"Strateji '{old}' → 'momentum' (momentum portföy, v4.5). İlk rebalance birkaç sn içinde; "
+                            "açık trend işlemleri kendi stoplarıyla kapanana kadar yönetilmeye devam eder.")
+    kv_set("migr:strategy_v45", True)
 
 
 RISK_TESTED = {"risk_per_trade_pct": 1.0, "max_open_positions": 3, "max_same_direction": 2, "daily_loss_limit_pct": 10.0}
@@ -142,6 +159,19 @@ def _clamp(st: dict) -> dict:
     for k, opts in config.SETTING_CHOICES.items():
         if st.get(k) not in opts:
             st[k] = config.DEFAULT_SETTINGS[k]
+    import re
+    uni = [x.strip().upper() for x in str(st.get("mom_universe", "")).split(",") if x.strip()]
+    if not uni or not all(re.fullmatch(r"[A-Z0-9]{2,20}USDT", x) for x in uni):
+        st["mom_universe"] = config.DEFAULT_SETTINGS["mom_universe"]
+    else:
+        st["mom_universe"] = ",".join(dict.fromkeys(uni))
+    try:
+        win = [int(x) for x in str(st.get("mom_windows", "")).split(",") if x.strip()]
+        if not win or not all(1 <= w <= 90 for w in win):
+            raise ValueError
+        st["mom_windows"] = ",".join(map(str, win))
+    except ValueError:
+        st["mom_windows"] = config.DEFAULT_SETTINGS["mom_windows"]
     from . import exits  # döngüsel içe aktarmayı önlemek için burada
     for k, frac in (("lock_tiers", False), ("partial_tp_tiers", True)):
         try:
