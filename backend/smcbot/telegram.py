@@ -83,6 +83,19 @@ def msg_setup(sig: dict, mode: str) -> str:
             f"Giriş: <code>{fmt_price(sig['entry'])}</code>" + (f" (skor {sig['score']:.0f})" if sig.get("score") is not None else ""))
 
 
+def msg_momentum(action: str, t: dict, qty: float, price: float, score: float | None, mode: str,
+                 pnl: float | None = None) -> str:
+    """Momentum portföy işlemi: coin, yön, miktar, fiyat, skor."""
+    m = MODE_TR.get(mode, mode)
+    icon = {"AÇILDI": "🟢", "ARTIRILDI": "➕", "AZALTILDI": "➖"}.get(action, "•")
+    lines = [f"{icon} <b>{_e(t['symbol'])} {t['side']} {action}</b>  <i>[{m}] momentum</i>",
+             f"Miktar: <code>{qty:g}</code> ({_m(qty * price)} USDT)  ·  Fiyat: <code>{fmt_price(price)}</code>",
+             f"Skor: <b>{_tr(f'{score:+.2f}') if score is not None else '-'}</b>  ·  Koruma stopu: <code>{fmt_price(t['sl'])}</code>"]
+    if pnl is not None:
+        lines.append(f"Gerçekleşen: {_m(pnl, True)} USDT")
+    return "\n".join(lines)
+
+
 def msg_alert(title: str, body: str) -> str:
     return f"⚠️ <b>SMC Bot · {_e(title)}</b>\n{_e(body)}"
 
@@ -107,12 +120,16 @@ def msg_daily(d: dict) -> str:
     for t in closed[:8]:
         pnl, r, why = t.get("pnl") or 0, t.get("r_multiple") or 0, _e(t.get("exit_reason") or "-")
         lines.append(f"• {_e(t['symbol'])} {t['side']}: {_m(pnl, True)} ({_r(r)}) — {why}")
+    if d.get("drawdown") is not None:
+        dd = _tr(f"{d['drawdown']:.1f}")
+        lim = _tr(f"{d.get('dd_limit', 10):g}")
+        lines.append(f"Bakiye: {_m(d.get('balance') or 0)} USDT  ·  Zirveden düşüş: %{dd} (limit %{lim})")
     pos = d.get("positions") or []
-    lines.append(f"\nAçık pozisyon: {len(pos)}/{d['max_open']}")
+    lines.append(f"\nAçık pozisyon: {len(pos)}" + (f"/{d['max_open']}" if d["max_open"] else ""))
     for t in pos:
         u, ur = t.get("upnl") or 0, t.get("upnl_r") or 0
         lines.append(f"• {_e(t['symbol'])} {t['side']}: {_m(u, True)} ({_r(ur)}) · stop <code>{fmt_price(t['sl'])}</code>")
-    if d["max_open"] and len(pos) >= d["max_open"]:
+    if d.get("max_open") and len(pos) >= d["max_open"]:
         lines.append("Limit dolu: yeni kırılımlar bir pozisyon kapanana kadar atlanır.")
     if d.get("scan_summary"):
         lines.append(f"\nSon tarama: {_e(d['scan_summary'])}")

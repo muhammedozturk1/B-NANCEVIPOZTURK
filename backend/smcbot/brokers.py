@@ -63,6 +63,11 @@ class PaperBroker:
         self._add(-fee)
         return {"price": price, "qty": qty, "fee": fee, "meta": {}}
 
+    async def add(self, t: dict, qty: float, ref_price: float, sym: SymbolInfo | None,
+                  client_id: str | None = None) -> dict:
+        """Açık pozisyona ekleme (portföy rebalance): piyasa emri gibi, aleyhte kayma + komisyon."""
+        return await self.open(t, qty, ref_price, sym)
+
     async def reduce(self, t: dict, qty: float, ref_price: float, kind: str, sym: SymbolInfo | None,
                      client_id: str | None = None) -> dict:
         """kind: 'tp' (limit gibi, kaymasız) | 'sl' / 'market' / 'partial' (piyasa emri: aleyhte kayma)."""
@@ -212,6 +217,31 @@ class LiveBroker:
         fee = price * q * s["taker_fee_pct"] / 100
         pnl = (price - t["entry_price"]) * q * _dir(t["side"])
         return {"price": price, "fee": fee, "pnl": pnl, "qty": q, "time": int(res.get("updateTime") or 0)}
+
+    async def add(self, t: dict, qty: float, ref_price: float, sym: SymbolInfo | None,
+                  client_id: str | None = None) -> dict:
+        """Açık pozisyonu aynı yönde büyüt (portföy rebalance). Stop closePosition olduğu için yeni miktarı da kapsar;
+        stop FİYATI çağıran tarafından move_stop ile güncellenir. client_id ile idempotent: aynı ekleme iki kez gitmez."""
+        assert sym is not None
+        s = self.s()
+        side = "BUY" if t["side"] == "LONG" else "SELL"
+        res = None
+        if client_id:
+            try:
+                prev = await self.rest.get_order(t["symbol"], client_id)
+                if prev and float(prev.get("executedQty") or 0) > 0:
+                    res = prev
+                    self.log("warn", f"#{t['id']} {client_id} daha önce dolmuş; tekrar gönderilmedi")
+            except BinanceError as e:
+                if e.code not in (-2011, -2013):
+                    raise
+        if res is None:
+            res = await self.rest.market_order(t["symbol"], side, sym.fmt_qty(qty), client_id=client_id)
+        q = float(res.get("executedQty") or 0)
+        if q <= 0:
+            raise BinanceError(0, None, f"Ekleme emri dolmadı: {res}")
+        price = float(res.get("avgPrice") or 0) or ref_price
+        return {"price": price, "qty": q, "fee": price * q * s["taker_fee_pct"] / 100}
 
     async def move_stop(self, t: dict, new_sl: float, sym: SymbolInfo | None) -> dict:
         """Önce yeni stop konur, sonra eskisi iptal edilir (arada pozisyon korumasız kalmaz).

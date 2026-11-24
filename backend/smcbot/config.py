@@ -90,6 +90,27 @@ DEFAULT_SETTINGS: dict = {
     "trail_activate_r": -1.0,        # trailing bu R görülünce başlar; -1 = hemen (eski davranış)
     "trail_atr_mult": 3.0,
 
+    # Momentum portföy (strategy = "momentum"): volatiliteye göre ayarlı momentum long-short + volatilite hedefi.
+    # Sonuçlar ve varsayımlar: docs/MOMENTUM_RAPORU.md. Bu stratejide aşağıdaki mom_* risk ayarları geçerlidir.
+    "mom_universe": "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,AVAXUSDT,LINKUSDT,DOGEUSDT",
+    "mom_rebalance_hours": 8,        # 4 | 8 | 12 | 24 (UTC 00:00'dan itibaren)
+    "mom_windows": "7,14,28",        # skor pencereleri (gün)
+    "mom_top_frac": 0.25,            # en iyi %25 long, en kötü %25 short
+    "mom_require_sign": True,        # long için skor > 0, short için skor < 0 (şartnamede yok; testte belirgin iyileşme)
+    "mom_target_vol_pct": 20.0,      # yıllık portföy volatilitesi hedefi
+    "mom_vol_lookback_days": 30,
+    "mom_max_leverage": 1.5,         # toplam nominal / özsermaye
+    "mom_max_coin_pct": 15.0,        # tek coinde en fazla nominal (% özsermaye)
+    "mom_trade_risk_pct": 1.5,       # koruma stopu olursa tek pozisyonda en fazla kayıp (% özsermaye)
+    "mom_stop_vol_mult": 3.0,        # koruma stopu = giriş ± k × günlük volatilite
+    "mom_funding_long_max_pct": 0.03,   # 8s funding bunun üstündeyse long açma
+    "mom_funding_short_min_pct": -0.03,  # 8s funding bunun altındaysa short açma
+    "mom_min_volume_musd": 50.0,     # 24s hacim alt sınırı (milyon USDT)
+    "mom_min_notional_policy": "skip",  # skip | round_up (tavanları aşmıyorsa borsa minimumuna yükselt)
+    "mom_rebalance_band_pct": 2.0,   # hedefle fark özsermayenin bu %'sinden azsa emir verme
+    "mom_max_dd_pct": 10.0,          # portföy zirveden bu kadar düşerse: tümünü kapat + kilitle
+    "mom_daily_loss_pct": 3.0,       # günlük (UTC) kayıp limiti: tümünü kapat, ertesi güne kadar bekle
+
     # Rejim filtreleri (her biri ayrı açılır/kapanır)
     "fng_missing": "allow",          # F&G alınamazsa: allow | skip | neutral_fallback (50 say)
     "fng_long_max": 75,              # F&G >= bu değer: long açma (aşırı açgözlülük)
@@ -146,6 +167,11 @@ SETTING_LIMITS: dict = {
     "fng_long_max": (1, 101), "fng_short_min": (-1, 99), "fng_long_min": (0, 100), "fng_short_max": (0, 100),
     "min_volume_ratio": (0.0, 10.0), "min_body_ratio": (0.0, 1.0), "min_close_strength": (0.0, 1.0),
     "max_correlation": (0.0, 1.0), "corr_lookback": (10, 500),
+    "mom_top_frac": (0.1, 0.5), "mom_target_vol_pct": (5.0, 60.0), "mom_vol_lookback_days": (10, 90),
+    "mom_max_leverage": (0.2, 2.0), "mom_max_coin_pct": (2.0, 50.0), "mom_trade_risk_pct": (0.2, 3.0),
+    "mom_stop_vol_mult": (1.0, 10.0), "mom_funding_long_max_pct": (0.0, 1.0), "mom_funding_short_min_pct": (-1.0, 0.0),
+    "mom_min_volume_musd": (0.0, 10000.0), "mom_rebalance_band_pct": (0.0, 20.0), "mom_max_dd_pct": (2.0, 50.0),
+    "mom_daily_loss_pct": (0.5, 20.0),
     "universe_size": (1, 60),
     "taker_fee_pct": (0.0, 1.0),
     "slippage_pct": (0.0, 1.0),
@@ -157,6 +183,9 @@ SETTING_CHOICES: dict = {
     "manage_tf": ("1h", "4h"),
     "trail_mode": ("off", "swing", "atr", "both"),
     "fng_missing": ("allow", "skip", "neutral_fallback"),
+    "strategy": ("trend", "smc", "momentum"),
+    "mom_rebalance_hours": (4, 8, 12, 24),
+    "mom_min_notional_policy": ("skip", "round_up"),
 }
 
 INTERVAL_MS = {

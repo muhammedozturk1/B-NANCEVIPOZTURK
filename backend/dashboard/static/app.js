@@ -317,8 +317,8 @@
       <div><span>Son tarama</span><b>${scn.last_scan ? fmtClock(scn.last_scan) : "—"}</b></div>
       <div><span>Sonraki</span><b>${scn.next_scan ? fmtClock(scn.next_scan) : "—"}</b></div>
       <div><span>Taranan coin</span><b>${scn.scanned || scn.universe}</b></div>
-      <div><span>Strateji</span><b>${s.strategy === "trend" ? "4s trend takibi" : "SMC"}</b></div>
-      <div><span>Zaman dilimi</span><b>${s.strategy === "trend" ? "4 saat" : scn.ltf + " giriş / " + scn.htf + " trend"}</b></div>
+      <div><span>Strateji</span><b>${s.strategy === "momentum" ? "Momentum portföy" : s.strategy === "trend" ? "4s trend takibi" : "SMC"}</b></div>
+      <div><span>Zaman dilimi</span><b>${s.strategy === "momentum" ? "1s mumlar, periyodik rebalance" : s.strategy === "trend" ? "4 saat" : scn.ltf + " giriş / " + scn.htf + " trend"}</b></div>
       <div><span>Korku endeksi</span><b>${s.fng == null ? "—" : s.fng}</b></div>
       <div><span>Süre</span><b>${scn.duration ? nf2.format(scn.duration) + " sn" : "—"}</b></div>
       <div class="wide"><span>Son tarama sonucu</span><b>${esc(scn.summary || "—")}</b></div>`;
@@ -478,14 +478,14 @@
     } else if (t.status === "cancelled") {
       outcome = `<div class="outcome"><b>Kurulum iptal edildi</b><br><span class="muted">${esc(t.exit_reason || "")}</span></div>`;
     } else if (t.status === "open") {
-      outcome = `<div class="outcome"><b>Pozisyon açık</b><br><span class="muted">Anlık fiyat ${price(t.mark)}. Stop ${price(t.sl)}${t.tp2 == null ? ", hedef yok (stop her 4 saatte iz sürer)" : ", hedef " + price(t.tp2)}.</span></div>`;
+      outcome = `<div class="outcome"><b>Pozisyon açık</b><br><span class="muted">Anlık fiyat ${price(t.mark)}. Stop ${price(t.sl)}${(t.annotations || {}).strategy === "momentum" ? " (koruma stopu). Miktar her rebalance'ta hedef ağırlığa göre ayarlanır" : t.tp2 == null ? ", hedef yok (stop her 4 saatte iz sürer)" : ", hedef " + price(t.tp2)}.</span></div>`;
     } else {
       outcome = `<div class="outcome"><b>Giriş bekleniyor</b><br><span class="muted">${t.tp2 == null ? "Kırılım onaylandı, piyasa emriyle giriliyor." : "Fiyat " + price(t.entry_price) + " seviyesine gelirse pozisyon açılacak."}</span></div>`;
     }
     $("#sheetBody").innerHTML = `
       ${outcome}
       <div class="pos-grid">
-        <div><span>${t.tp2 == null ? "Strateji" : "Skor"}</span><b>${t.tp2 == null ? "4s trend" : sc(t.score) + "/100"}</b></div>
+        <div><span>${t.tp2 == null ? "Strateji" : "Skor"}</span><b>${(t.annotations || {}).strategy === "momentum" ? "Momentum " + (t.score == null ? "" : (t.score > 0 ? "+" : "") + nf2.format(t.score)) : t.tp2 == null ? "4s trend" : sc(t.score) + "/100"}</b></div>
         <div><span>Giriş</span><b>${price(t.entry_price)}</b></div>
         <div><span>Stop</span><b>${price(t.sl_initial || t.sl)}</b></div>
         <div><span>${t.tp2 == null ? "Güncel stop" : "TP1 / TP2"}</span><b>${t.tp2 == null ? price(t.sl) : price(t.tp1) + " / " + price(t.tp2)}</b></div>
@@ -526,13 +526,27 @@
       ["max_consecutive_losses", "Art arda stop limiti", 1], ["cooldown_hours", "Soğuma süresi (saat)", 1],
       ["max_drawdown_pct", "Zirveden düşüşte durdur (%)", 1]]],
     ["Strateji", [
-      ["strategy", "Strateji", { trend: "4 saatlik trend takibi (önerilen)", smc: "SMC likidite avı (eski)" }],
+      ["strategy", "Strateji", { momentum: "Momentum portföy (long-short, volatilite hedefli)", trend: "4 saatlik trend takibi", smc: "SMC likidite avı (eski)" }],
       ["trend_n", "Trend: kırılım kanalı (4s mum)", 1], ["trend_stop_atr", "Trend: ilk stop (×ATR)", 0.1],
       ["trend_exit_n", "Trend: iz süren stop (4s mum)", 1], ["trend_max_new_per_bar", "Trend: aynı 4s mumda maks. yeni giriş (0 = sınırsız)", 1],
       ["universe_size", "Taranacak coin sayısı", 1],
       ["fng_filter", "Korku endeksi: aşırı açgözlülükte long, aşırı korkuda short açma", "check"],
       ["notify_setups", "Bulunan kurulumları da Telegram'a gönder", "check"],
       ["telegram_daily_summary", "Her gün 23:05'te Telegram'a günlük özet gönder", "check"]]],
+    ["Momentum portföy (strateji = Momentum)", [
+      ["mom_universe", "Coinler (virgülle)", "text"],
+      ["mom_rebalance_hours", "Rebalance sıklığı", { 4: "4 saatte bir", 8: "8 saatte bir (önerilen)", 12: "12 saatte bir", 24: "Günde bir" }],
+      ["mom_windows", "Skor pencereleri (gün, virgülle)", "text"],
+      ["mom_require_sign", "İşaret şartı: long sadece pozitif, short sadece negatif momentum (önerilen)", "check"],
+      ["mom_top_frac", "Long / short dilimi (0,25 = en iyi ve en kötü %25)", 0.05],
+      ["mom_target_vol_pct", "Hedef yıllık portföy volatilitesi (%)", 1], ["mom_vol_lookback_days", "Volatilite penceresi (gün)", 1],
+      ["mom_max_leverage", "Maks. toplam kaldıraç (x)", 0.1], ["mom_max_coin_pct", "Tek coinde maks. nominal (% bakiye)", 0.5],
+      ["mom_trade_risk_pct", "Tek pozisyonda maks. risk (% bakiye)", 0.1], ["mom_stop_vol_mult", "Koruma stopu (× günlük volatilite)", 0.5],
+      ["mom_funding_long_max_pct", "Long açma: funding bunun üstündeyse (%/8s)", 0.01], ["mom_funding_short_min_pct", "Short açma: funding bunun altındaysa (%/8s)", 0.01],
+      ["mom_min_volume_musd", "Min. 24s hacim (milyon USDT)", 1],
+      ["mom_min_notional_policy", "Borsa minimumunun altındaki hedef", { skip: "Açma (önerilen)", round_up: "Tavanları aşmıyorsa minimuma yükselt" }],
+      ["mom_rebalance_band_pct", "Küçük farkları yoksay (% bakiye)", 0.5],
+      ["mom_max_dd_pct", "Maks. drawdown: tümünü kapat + kilitle (%)", 0.5], ["mom_daily_loss_pct", "Günlük kayıp limiti: tümünü kapat (%)", 0.5]]],
     ["Trend çıkış yönetimi (1R = giriş − ilk stop, sabit)", [
       ["lock_tiers", "Kâr kilidi kademeleri (tetikR:kilitR, virgülle; boş = kapalı) örn. 1.0:0, 1.5:0.5, 2.0:1.0", "text"],
       ["lock_fee_cover", "Kilit seviyesine komisyon + kaymayı ekle (0R gerçekten başabaş olsun)", "check"],

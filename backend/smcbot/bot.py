@@ -17,6 +17,7 @@ from .binance_client import BinanceError, BinanceREST
 from .brokers import LiveBroker, PaperBroker
 from .config import INTERVAL_MS
 from .market import MarketData
+from .momentum_runner import MomentumMixin
 from .risk import RiskGuard, compute_stats, correlation_block, log_returns, size_position
 from .strategy import SymbolAnalyzer, fmt_price
 
@@ -37,7 +38,7 @@ def _dir(side: str) -> int:
     return 1 if side == "LONG" else -1
 
 
-class Bot:
+class Bot(MomentumMixin):
     def __init__(self) -> None:
         self.settings = db.get_settings()
         self.md = MarketData(self.log)
@@ -258,6 +259,9 @@ class Bot:
         if self.broker is None or (isinstance(self.broker, LiveBroker) and self.live_error):
             self.scan_info["status"] = "Hesap/bağlantı sorunu: " + (self.live_error or "işlem motoru hazır değil")
             return
+        if self.is_momentum():
+            await self._momentum_tick(now)
+            return
         if self.settings.get("strategy") == "trend" and self.settings.get("manage_tf") == "1h":
             hb = now // INTERVAL_MS["1h"]
             if hb != self._last_manage_bucket and (self.sim or now % INTERVAL_MS["1h"] >= 3000):
@@ -273,6 +277,8 @@ class Bot:
         await self.scan()
 
     def scan_tf(self) -> str:
+        if self.is_momentum():
+            return "1h"
         return "4h" if self.settings.get("strategy") == "trend" else self.settings["ltf"]
 
     async def scan(self) -> None:
@@ -627,6 +633,8 @@ class Bot:
             "closed": sorted(closed, key=lambda t: t.get("exit_time") or 0), "positions": positions,
             "max_open": int(self.settings["max_open_positions"]), "scan_summary": self.scan_info.get("summary"),
             "running": self.settings["running"], "halted": g["halt_reason"] if g["halted"] else None,
+            **({"max_open": 0, "balance": bal, "drawdown": self.mom_drawdown_pct(eq),
+                "dd_limit": float(self.settings.get("mom_max_dd_pct", 10.0))} if self.is_momentum() else {}),
         })
 
     def _candidate_raw(self, c: dict) -> None:
@@ -792,6 +800,11 @@ class Bot:
             r_now = (mark - t["entry_price"]) * d / ru
             if r_now > (t.get("mfe") or 0) + 0.02 or -r_now > (t.get("mae") or 0) + 0.02:
                 db.update_trade(t["id"], mfe=max(t.get("mfe") or 0, r_now), mae=max(t.get("mae") or 0, -r_now))
+            if (t.get("meta") or {}).get("exit_mode") == "portfolio":
+                # momentum: sadece koruma stopu (borsada bekler; demoda mark fiyatıyla). Diğer her şey rebalance'ta.
+                if paper and ((mark <= t["sl"]) if L else (mark >= t["sl"])):
+                    await self._close(t, mark, "sl", "Koruma stopu")
+                continue
             if (t.get("meta") or {}).get("exit_mode") == "trail":
                 # trend: stop borsada bekler (demoda mark fiyatıyla kontrol). Kâr kilidi / kısmi TP tetik kaynağı ayardan.
                 if paper and ((mark <= t["sl"]) if L else (mark >= t["sl"])):
@@ -917,7 +930,9 @@ class Bot:
                     t = c["trade"]
                     px = c["price"]
                     d = _dir(t["side"])
-                    if t.get("tp2") is None:
+                    if (t.get("meta") or {}).get("exit_mode") == "portfolio":
+                        reason = "Koruma stopu (borsa)"
+                    elif t.get("tp2") is None:
                         reason = "İz süren stop (borsa)" if (px - t["entry_price"]) * d > 0 else "Stop (borsa)"
                     elif abs(px - t["sl"]) <= abs(px - t["tp2"]):
                         reason = "Başabaş stop (TP1 sonrası)" if t["tp1_hit"] else "Stop (borsa)"
@@ -950,6 +965,7 @@ class Bot:
                 self._funding_seen[sym] = (rate, nxt)
         bal, eq, _ = await self.equity()
         if bal > 0:
+            await self._momentum_risk(bal, eq, now)
             alert = self.guard.update(bal, eq, now, s)
             if alert:
                 self.log("error", alert + " — Bot durduruldu. Panelden 'Kilidi kaldır' ile devam edebilirsin.")
@@ -1065,6 +1081,7 @@ class Bot:
         self.guard.unlock()
         st = self.guard.state()
         db.kv_set(f"risk:{self.mode}:peak_equity", 0.0)  # zirveyi şimdiki equity'den yeniden başlat
+        self.mom_reset_peak()
         self.log("warn", "Risk kilidi elle kaldırıldı" + (f" ({st['halt_reason']})" if st["halt_reason"] else ""))
 
     # ------------------------------------------------------------------ geçmiş test
@@ -1072,6 +1089,9 @@ class Bot:
         self._require_leader()
         if self.backtest_state["running"]:
             raise ValueError("Geçmiş test zaten çalışıyor")
+        if self.is_momentum():
+            raise ValueError("Momentum portföyü için panel içi geçmiş test yok. Sonuçlar: docs/MOMENTUM_RAPORU.md "
+                             "(script: scripts/momentum_backtest.py)")
         days = max(3, min(365 if self.settings.get("strategy") == "trend" else 90, int(days)))
         n_symbols = max(1, min(40, int(n_symbols)))
         syms = list(self.md.universe)[:n_symbols]
@@ -1141,6 +1161,7 @@ class Bot:
                        "liq_24h": self.md.liq.total_24h(), "uptime": int(time.time() - self.started)},
             "stats": self.stats(), "gate": self.gate() if self.mode != "live" else None,
             "backtest": self.backtest_state,
+            "momentum": ({**self.mom_state(), "drawdown_pct": self.mom_drawdown_pct(eq)} if self.is_momentum() else None),
             "keys": {"testnet": bool(config.TESTNET_API_KEY), "live": bool(config.LIVE_API_KEY)},
         }
 

@@ -1,5 +1,37 @@
 # Kripto Bot v4.3 — SMC Bot (4 saatlik trend takibi) + SMC Scalper (4s kırılım, %1 stop / %2 hedef)
 
+## v4.5 — Momentum portföy stratejisi (varsayılan strateji)
+
+Volatiliteye göre ayarlı momentum long-short + volatilite hedefleme. Ayrıntılar ve test sonuçları: `docs/MOMENTUM_RAPORU.md`.
+
+**Kod**
+- Strateji: `backend/smcbot/momentum.py` (saf fonksiyonlar). Bot entegrasyonu: `backend/smcbot/momentum_runner.py`.
+- Bot ve geçmiş test aynı fonksiyonları kullanır.
+
+**Çalışma**
+- Coinler: BTC, ETH, SOL, BNB, XRP, AVAX, LINK, DOGE. Rebalance 4 / 8 / 12 / 24 saatte bir (varsayılan 8).
+- Skor: 7, 14 ve 28 günlük getiri / volatilite ortalaması. En iyi %25 long, en kötü %25 short.
+- İşaret şartı (varsayılan açık): long'a sadece pozitif, short'a sadece negatif momentumlu coin girer.
+- Filtreler: funding ve 24 saatlik hacim.
+
+**Pozisyon büyüklüğü**
+- Risk paritesi + %20 hedef volatilite (30 günlük kovaryans).
+- Tavanlar: coin başı %15 nominal, işlem başı %1,5 risk (koruma stopu 3 × günlük volatilite), toplam 1,5x kaldıraç.
+- Binance minimum emir tutarı kontrol edilir.
+
+**Risk**
+- Zirveden %10 düşüşte: tümü kapatılır, bot kilitlenir, Telegram'a acil uyarı gider.
+- Günlük %3 kayıpta: tümü kapatılır, ertesi güne (UTC) kadar beklenir.
+
+**Bildirim ve ayarlar**
+- Telegram: her açma / artırma / azaltma / kapatma (coin, yön, miktar, fiyat, skor), günlük özet (P&L, pozisyonlar, drawdown, bakiye) ve risk uyarıları.
+- Tüm ayarlar panelde, "Momentum portföy" bölümünde.
+
+**Sonuç (200 USDT, 2021–2026, maliyet + funding + Binance minimumları dahil, risk kilidi kapalı)**
+- İşaret şartıyla: yıllık %12,2, Sharpe 0,94, en büyük düşüş −%15,7.
+- Şartnamedeki hâliyle: yıllık %4,7, Sharpe 0,43, en büyük düşüş −%19,3.
+- %10 drawdown kilidi her iki ayarda da 2022'de devreye girdi.
+
 ## v4.4 — Trend botu: çıkış motoru, stop güvenliği, rejim filtreleri
 
 Ayrıntılı karşılaştırma: `docs/TREND_CIKIS_RAPORU.md`. Yeniden üretmek için: `scripts/trend_compare/`.
