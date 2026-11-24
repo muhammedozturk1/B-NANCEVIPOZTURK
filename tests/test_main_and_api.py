@@ -77,7 +77,7 @@ def test_dashboard_requires_login_and_health_is_public():
         smc = c.get("/smc/")
         assert smc.status_code == 200 and "KILL SWITCH" in smc.text
         risk = c.get("/smc/api/summary").json()["risk"]
-        # SMC Scalper artık 4s kırılım stratejisi: risk her zaman kasanın %1'i (SMC_RISK_PER_TRADE etkisiz)
-        assert risk["risk_per_trade"] == 0.01 and risk["strategy"] == "breakout"
+        # SMC Scalper v4.6: scalp stratejisi, sabit 2 USDT risk / 200 USDT sanal kasa = %1 (gösterim)
+        assert risk["risk_per_trade"] == 0.01 and risk["strategy"] == "scalp"
         assert "/smc/" in c.get("/").text  # SMC Bot panelinde SMC Scalper linki
         assert c.get("/api/state").status_code == 503  # testlerde SMC Bot kapalı (SMCBOT_ENABLED=false)

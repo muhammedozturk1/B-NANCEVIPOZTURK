@@ -25,7 +25,8 @@ from backend.smc.market_data.universe import SymbolFilters
 from backend.smc.notifications.telegram import TelegramNotifier
 from backend.smc.risk.engine import RiskDecision, register_trade_result
 from backend.smc.risk.plan import TPLevel, open_risk, plan_take_profits, planned_rr, r_multiple, stop_after_tp
-from backend.smc.risk.sizing import per_unit_loss
+from backend.smc.risk.sizing import per_unit_loss, round_price
+from backend.smc.strategy.scalp import ScalpParams, strong_opposite
 from backend.smc.strategy.signal import TradeSetup
 
 log = logging.getLogger(__name__)
@@ -335,6 +336,49 @@ class TradeManager:
             if await self._place_tps(pos, [l for l in levels if not l.filled]):
                 pos = self.repo.update_position(pos.id, tp_missing=False)
         self.repo.update_position(pos.id, open_risk=open_risk(side, pos.entry_price, pos.stop_price, ex_qty, self.cfg))
+
+    # ------------------------------------------------------------- scalp
+    async def scalp_check(self, pos: Position, mark: float | None, c1: list, p: ScalpParams) -> str | None:
+        """Scalp şartnamesinin borsada emirle karşılanamayan çıkış kuralları (her yönetim döngüsünde):
+        1) en fazla `max_hold_min` dakika → piyasa emriyle kapat (TIME_EXIT)
+        2) giriş sonrası kapanan 1 dk mum ters yönde güçlü ve hacimliyse → kapat (OPPOSITE_CANDLE)
+        3) fiyat 0,7R'ye ulaşınca stop giriş fiyatına (BREAKEVEN). Stop asla geri gitmez.
+        Dönüş: yapılan eylem (test/log için) veya None."""
+        if pos.id in self.busy or not pos.entry_price or PosState(pos.state) not in LIVE_STATES:
+            return None
+        if PosState(pos.state) in (S.RECONCILIATION_REQUIRED, S.EMERGENCY_EXIT, S.SAFE_MODE):
+            return None
+        side = Side(pos.side)
+        sg = side.sign
+        opened = ensure_utc(pos.entry_filled_at or pos.opened_at)
+        now = self.clock()
+        if opened is not None and (now - opened).total_seconds() >= p.max_hold_min * 60:
+            self.notifier.notify("CLOSED", f"{pos.symbol} {p.max_hold_min} dk doldu → piyasa emriyle kapatılıyor")
+            await self.emergency_close(pos, "TIME_EXIT")
+            return "TIME_EXIT"
+        if c1 and opened is not None and len(c1) > p.volume_lookback:
+            last = c1[-1]
+            if last.open_time >= int(opened.timestamp() * 1000) and strong_opposite(last, c1[:-1], side, p):
+                self.notifier.notify("CLOSED", f"{pos.symbol} ters yönde güçlü hacimli mum → kapatılıyor")
+                await self.emergency_close(pos, "OPPOSITE_CANDLE")
+                return "OPPOSITE_CANDLE"
+        if not pos.be_active and mark is not None and pos.initial_stop:
+            r = abs(pos.entry_price - pos.initial_stop)
+            if r > 0 and (mark - pos.entry_price) * sg >= p.be_r * r:
+                f = self.filters(pos.symbol)
+                be = round_price(pos.entry_price, f.tick_size, "up" if side is Side.LONG else "down")
+                if (be - pos.stop_price) * sg <= 0:  # zaten daha iyi bir stop var
+                    return None
+                if (mark - be) * sg <= 0:
+                    return None  # fiyat zaten girişin altına döndü; stop konamaz (anında tetiklenir)
+                if await self.replace_stop(pos, be, pos.remaining_qty):
+                    pos = self.repo.update_position(pos.id, be_active=True)
+                    if PosState(pos.state) in (S.ACTIVE, S.TP1_FILLED):
+                        pos = self.repo.transition(pos.id, S.BREAKEVEN_ACTIVE)
+                    self.notifier.notify("BREAKEVEN", f"{pos.symbol} {p.be_r:g}R görüldü → stop girişe ({be:g})")
+                    return "BREAKEVEN"
+                self.notifier.notify("SL_FAILURE", f"{pos.symbol} başabaş stopu konamadı; mevcut stop korunuyor")
+        return None
 
     async def _exit_reason(self, pos: Position) -> str:
         orders = self.repo.orders_for_position(pos.id)

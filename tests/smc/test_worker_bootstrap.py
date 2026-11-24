@@ -12,7 +12,7 @@ SYMS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
 
 def _klines(path_params, now_ms):
-    tf = {"3m": 180_000, "5m": 300_000, "15m": 900_000, "4h": 14_400_000}[path_params["interval"]]
+    tf = {"1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000, "4h": 14_400_000}[path_params["interval"]]
     limit = int(path_params.get("limit", 499))
     rng = random.Random(hash(path_params["symbol"] + path_params["interval"]) % 1000)
     start = now_ms - now_ms % tf - (limit - 1) * tf
@@ -101,4 +101,29 @@ def test_bootstrap_breakout_strategy_loads_4h_and_scans(db):
         assert not w.repo.open_positions()
         sigs = w.repo.recent_signals(10) if hasattr(w.repo, "recent_signals") else []
         assert all(x.score == 0 for x in sigs)
+    run(go())
+
+
+def test_bootstrap_scalp_strategy_btc_eth_only_1m_scan_and_no_telegram(db):
+    """v4.6 scalp: yalnız BTCUSDT/ETHUSDT, 1 dk mumlar yüklenir, tarama 1 dk kapanışında, kasa 200 USDT,
+    Telegram kapalı (token verilse bile SMC_TELEGRAM_ENABLED=false iken gönderilmez)."""
+    s = make_settings(min_24h_quote_volume=0, universe_size=3, fng_enabled=False, strategy="scalp",
+                      telegram_bot_token="123:abc", telegram_chat_id="42")
+    w = TradingWorker(s, db=db)
+    assert w.notifier.enabled is False
+    mock = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    w.rest = BinanceREST(s.binance_rest_url, "k", "s", client=mock)
+    w.public = BinanceREST(s.public_data_rest_url, client=mock)
+    w.gw.rest = w.rest
+
+    async def go():
+        await w.bootstrap()
+        assert set(w.universe) == {"BTCUSDT", "ETHUSDT"}
+        assert "1m" in w.tfs and w.scan_tf == "1m"
+        await w.backfill(w.universe)
+        assert len(w.candles.get("BTCUSDT", "1m")) >= 300
+        assert w.repo.state().equity == 200.0
+        last = w.candles.get("BTCUSDT", "1m")[-1].close_time
+        await w.scan(last + 1)  # websocket hazır değil: sinyal olsa da işlem açılmaz
+        assert not w.repo.open_positions()
     run(go())

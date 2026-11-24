@@ -77,6 +77,43 @@ def liquidation_buffer_ok(side: Side, entry: float, stop: float, liq: float, cfg
 
 
 # ------------------------------------------------------------------- sizing
+def _scalp_size(side: Side, equity: float, available_balance: float, entry: float, stop: float,
+                filters: SymbolFilters, cfg: Settings) -> "SizingResult":
+    """Scalp şartnamesi: miktar = sabit risk / stop mesafesi (komisyon hariç), kaldıraç sabit 10x.
+    Risk tam karşılanamıyorsa (teminat yetmiyor, borsa minimumu/maksimumu, stop > %0,38) işlem AÇILMAZ."""
+    dist = abs(entry - stop)
+    risk_target = float(cfg.sc_risk_usdt)
+    if dist / entry > cfg.sc_max_stop_pct + 1e-12:
+        return SizingResult(False, "stop_too_wide", risk_target=risk_target)
+    raw = risk_target / dist
+    lo, hi = round_to_step(raw, filters.step_size, "down"), round_to_step(raw, filters.step_size, "up")
+    qty = lo if abs(lo * dist - risk_target) <= abs(hi * dist - risk_target) else hi  # 2 USDT'ye en yakın adım
+    lev = int(min(cfg.sc_leverage, filters.max_leverage))
+    if lev < cfg.sc_leverage:
+        return SizingResult(False, "leverage_unavailable", risk_target=risk_target)
+    if qty < float(filters.min_qty) or qty <= 0:
+        return SizingResult(False, "qty_below_min", risk_target=risk_target)
+    if qty > min(float(filters.max_qty), float(filters.market_max_qty)):
+        return SizingResult(False, "qty_above_max", risk_target=risk_target)
+    notional = qty * entry
+    if notional < filters.min_notional:
+        return SizingResult(False, "notional_below_min", qty=qty, notional=notional, risk_target=risk_target)
+    risk_actual = qty * dist
+    if abs(risk_actual - risk_target) > risk_target * cfg.sc_risk_tolerance:  # borsa adımı yüzünden tutmuyorsa açma
+        return SizingResult(False, "risk_not_exact", qty=qty, risk_target=risk_target, risk_actual=risk_actual)
+    margin = notional / lev
+    if margin > equity or margin > available_balance * cfg.max_margin_usage:
+        return SizingResult(False, "insufficient_margin", qty=qty, notional=notional, risk_target=risk_target)
+    liq = estimate_liquidation_price(side, entry, qty, lev, filters.maint_margin_rate, filters.maint_amount)
+    ok, _gap = liquidation_buffer_ok(side, entry, stop, liq, cfg)
+    if not ok:
+        return SizingResult(False, "liquidation_buffer_insufficient", qty=qty, notional=notional,
+                            risk_target=risk_target)
+    fees = (entry + stop) * cfg.taker_fee * qty
+    slip = (entry + stop) * cfg.slippage_pct * qty
+    return SizingResult(True, "", qty, notional, lev, margin, risk_target, risk_actual, dist, fees, slip, liq, "risk")
+
+
 @dataclass
 class SizingResult:
     ok: bool
@@ -107,6 +144,8 @@ def compute_position_size(*, side: Side, equity: float, available_balance: float
         return SizingResult(False, "non_positive_equity")
     if (side is Side.LONG and stop >= entry) or (side is Side.SHORT and stop <= entry):
         return SizingResult(False, "stop_on_wrong_side")
+    if getattr(cfg, "strategy", "") == "scalp":
+        return _scalp_size(side, equity, available_balance, entry, stop, filters, cfg)
     risk_target = equity * cfg.risk_per_trade * max(0.0, min(1.0, risk_factor))
     pul, fees_u, slip_u = per_unit_loss(side, entry, stop, cfg)
     qty = risk_target / pul
