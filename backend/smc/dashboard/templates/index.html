@@ -86,7 +86,17 @@ async function api(path, opts={}) {
 // Ret sebeplerini sade Türkçeye çevirir (orijinal kod üzerine gelince görünür)
 const COMP_TR = {htf_structure:"15dk trend uyumsuz", ltf_structure:"5dk kırılım yok", liquidity_sweep:"likidite süpürmesi yok",
   ote:"fiyat giriş bölgesine (OTE) gelmedi", trigger_3m:"3dk onay mumu yok"};
+const SCALP_TR = {"trend:sticky":"fiyat 5dk EMA20'ye çok yakın", "trend:against":"5dk yön ters (EMA20)",
+  volume:"hacim 1,8× ortalamanın altında", body:"kırılım mumu zayıf (gövde < %55)", rsi:"RSI aşırı bölgede",
+  wick:"son 2 mumda aşırı uzun fitil", session:"01:30–05:30 UTC işlem yok", spread:"spread yüksek",
+  stop_distance:"stop mesafesi %0,38'i geçiyor"};
 const REASON_TR = {
+  "trend:sticky": () => SCALP_TR["trend:sticky"], "trend:against": () => SCALP_TR["trend:against"],
+  volume: () => SCALP_TR.volume, body: () => SCALP_TR.body, rsi: () => SCALP_TR.rsi, wick: () => SCALP_TR.wick,
+  session: () => SCALP_TR.session,
+  "risk:sizing:risk_not_exact": () => "risk tam 2 USDT tutturulamıyor (borsa miktar adımı)",
+  "risk:sizing:insufficient_margin": () => "10x teminat kasaya yetmiyor (stop çok dar)",
+  "risk:sizing:stop_too_wide": () => "stop mesafesi %0,38'i geçiyor",
   no_sweep: () => "likidite süpürmesi yok",
   insufficient_data: () => "yeterli mum verisi yok",
   invalid_stop: () => "uygun stop noktası yok",
@@ -94,7 +104,7 @@ const REASON_TR = {
   stop_too_tight: v => `stop çok yakın (%${parseFloat(v).toFixed(2)})`,
   score_below_min: v => `puan yetersiz (${v})`,
   fng: v => "korku endeksi engeli: " + v,
-  stop_distance: v => `stop mesafesi uygun değil (%${(parseFloat(v)*100).toFixed(2)})`,
+  stop_distance: v => v ? `stop mesafesi uygun değil (%${(parseFloat(v)*100).toFixed(2)})` : SCALP_TR.stop_distance,
   per_bar_limit: v => `bu 4s kapanışında zaten ${v} işlem açıldı (aynı anda kırılan coinler tek hareket sayılır)`,
   position_exists_on_symbol: () => "bu coinde zaten pozisyon var",
   mandatory_failed: v => "zorunlu kontrol eksik: " + v.split(",").map(x => COMP_TR[x] || x).join(", "),
@@ -104,7 +114,7 @@ const REASON_TR = {
                RECONCILIATION_REQUIRED:"kontrol gerekiyor", trial_expired:"trial bitti", clock_not_synced:"saat senkron değil"})[v] || v,
   "risk:spread": v => "fark (spread) çok yüksek",
   "risk:liquidity": v => "piyasa derinliği yetersiz",
-  "risk:max_open_positions": () => "zaten 3 açık pozisyon var",
+  "risk:max_open_positions": () => "zaten açık pozisyon var (en fazla sınırına ulaşıldı)",
   "risk:position_exists_on_symbol": () => "bu coinde zaten pozisyon var",
   "risk:daily_loss_limit": () => "günlük zarar limiti doldu",
   "risk:cooldown_active": () => "3 zarardan sonra bekleme süresi",
@@ -151,7 +161,7 @@ async function refresh() {
   $("risk").innerHTML = kv([["Risk / trade", pct(r.risk_per_trade)], ["Max open risk", pct(r.max_open_risk)],
     ["Daily loss limit", pct(r.daily_loss_limit)], ["Current open risk", `${f(r.current_open_risk,3)} (${pct(r.current_open_risk_pct)})`],
     ["Margin usage", pct(r.margin_usage_pct)], ["Max leverage", r.max_leverage+"x"],
-    ["Strateji", r.strategy === "breakout" ? "4s kırılım · stop %1 / hedef %2" : (r.profile === "active" ? "SMC (aktif)" : "SMC (şartname)")],
+    ["Strateji", r.strategy === "scalp" ? "BTC/ETH scalp · 2 USDT risk · TP 1,4R · 6 dk" : r.strategy === "breakout" ? "4s kırılım · stop %1 / hedef %2" : (r.profile === "active" ? "SMC (aktif)" : "SMC (şartname)")],
     ["Ardışık SL", r.consecutive_losses], ["Cooldown", r.cooldown_until ? new Date(r.cooldown_until).toLocaleTimeString() : "–"]]);
   $("riskbar").style.width = Math.min(100, r.current_open_risk_pct / r.max_open_risk * 100) + "%";
   $("dlbar").style.width = Math.min(100, dl*100) + "%";
@@ -162,13 +172,23 @@ async function refresh() {
       <td>${p.remaining}/${p.qty}</td><td>${p.leverage}x</td><td>${f(p.risk_amount,3)}</td><td>${f(p.open_risk,3)}</td><td>${p.score ? p.score + "/15" : "–"}</td>
       <td><button onclick="showChart(${p.id})">Grafik</button></td></tr>`).join("") : `<tr><td colspan="14" class="muted">Açık pozisyon yok</td></tr>`);
 
+  const EXIT_TR = {TP1:"TP", SL:"Stop", BREAKEVEN_STOP:"Başabaş stop", TIME_EXIT:"6 dk doldu", OPPOSITE_CANDLE:"Ters güçlü mum",
+                   STRATEGY_CHANGE:"Strateji değişti", EXTERNAL:"Dışarıdan kapandı"};
+  if (r.strategy === "scalp") {
+    $("trades").innerHTML = `<tr><th>Zaman</th><th>Coin</th><th>Yön</th><th>Giriş</th><th>Stop</th><th>TP</th><th>Çıkış</th><th>Sonuç</th><th>R</th><th>Süre</th><th>Neden</th><th>Komisyon</th><th></th></tr>` +
+      (d.trades.length ? d.trades.map(t => `<tr><td>${t.entry_time ? new Date(t.entry_time).toLocaleString() : "–"}</td><td>${esc(t.symbol)}</td>
+        <td><span class="tag ${t.side}">${t.side}</span></td><td>${px(t.entry)}</td><td>${px(t.stop)}</td><td>${px(t.tp)}</td><td>${px(t.exit)}</td>
+        <td class="${cls(t.net_pnl)}">${f(t.net_pnl,4)}</td><td class="${cls(t.r)}">${f(t.r,2)}</td><td>${dur(t.duration_s)}</td>
+        <td>${esc(EXIT_TR[t.exit_reason] || t.exit_reason)}</td><td>${f(t.commission,4)}</td>
+        <td><button onclick="showChart(${t.position_id})">Replay</button></td></tr>`).join("") : `<tr><td colspan="13" class="muted">Henüz kapanan işlem yok</td></tr>`);
+  } else
   $("trades").innerHTML = `<tr><th>Coin</th><th>Yön</th><th>Entry</th><th>Exit</th><th>Net PnL</th><th>R</th><th>Komisyon</th><th>Funding</th><th>Süre</th><th>Çıkış</th><th>TP</th><th>Skor</th><th></th></tr>` +
     (d.trades.length ? d.trades.map(t => `<tr><td>${esc(t.symbol)}</td><td><span class="tag ${t.side}">${t.side}</span></td><td>${px(t.entry)}</td><td>${px(t.exit)}</td>
       <td class="${cls(t.net_pnl)}">${f(t.net_pnl,4)}</td><td class="${cls(t.r)}">${f(t.r,2)}</td><td>${f(t.commission,4)}</td><td>${f(t.funding,4)}</td>
       <td>${dur(t.duration_s)}</td><td>${esc(t.exit_reason)}</td><td>${(t.tp_hits||[]).join(",")||"–"}</td><td>${t.score??"–"}</td>
       <td><button onclick="showChart(${t.position_id})">Replay</button></td></tr>`).join("") : `<tr><td colspan="13" class="muted">Henüz kapanan işlem yok</td></tr>`);
 
-  $("signals").innerHTML = d.signals.map(s => `<div title="${esc(s.reason||"")}"><span class="tag ${s.side}">${s.side}</span> <b>${esc(s.symbol)}</b> ${s.score ? s.score + "/15" : "4s kırılım"} ${s.accepted?'<span class="pos">✓ işlem açıldı</span>':'<br><span class="muted">'+esc(trReason(s.reason))+'</span>'}</div>`).join("") || '<div class="muted">Henüz sinyal yok</div>';
+  $("signals").innerHTML = d.signals.map(s => `<div title="${esc(s.reason||"")}"><span class="tag ${s.side}">${s.side}</span> <b>${esc(s.symbol)}</b> ${s.score ? s.score + "/15" : (r.strategy === "scalp" ? "1dk kırılım" : "4s kırılım")} ${s.accepted?'<span class="pos">✓ işlem açıldı</span>':'<br><span class="muted">'+esc(trReason(s.reason))+'</span>'}</div>`).join("") || '<div class="muted">Henüz sinyal yok</div>';
   $("events").innerHTML = d.events.map(e => `<div><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> <b class="${e.level==="ERROR"?"neg":""}">${esc(e.kind)}</b> ${esc(e.message)}</div>`).join("");
   $("riskev").innerHTML = d.commands.map(c => `<div><b>${esc(c.command)}</b> ${esc(c.status)} <span class="muted">${esc(c.result||"")}</span></div>`).join("") +
     d.risk_events.map(e => `<div><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> ${esc(e.kind)} ${esc(e.symbol||"")} <span class="muted">${esc(JSON.stringify(e.details)).slice(0,140)}</span></div>`).join("");

@@ -315,6 +315,7 @@ def _trade_dict(t: Trade) -> dict:
             "exit": t.exit_price, "qty": t.quantity, "net_pnl": t.net_pnl, "gross_pnl": t.gross_pnl,
             "commission": t.commission, "funding": t.funding, "slippage": t.slippage, "r": t.realized_rr,
             "planned_rr": t.planned_rr, "duration_s": dur, "exit_reason": t.exit_reason, "score": t.signal_score,
+            "stop": t.stop_price, "tp": t.tp1_price,
             "entry_time": t.entry_time.isoformat() if t.entry_time else None,
             "exit_time": t.exit_time.isoformat() if t.exit_time else None, "tp_hits": t.tp_hits}
 

@@ -50,10 +50,38 @@ class Settings(BaseSettings):
     # Bir parametre env ile açıkça verilirse (örn. SMC_MAX_STOP_PCT) profil onu ezmez.
     profile: Literal["spec", "active"] = "active"
     # Strateji (SMC_STRATEGY):
-    #   breakout : 4 saatlik kanal kırılımı, stop = kasanın %1'i, tek hedef = kasanın %2'si (net). Varsayılan.
+    #   scalp    : kullanıcı şartnamesi — BTC/ETH, 5dk EMA20 yön + 1dk kırılım, sabit 2 USDT risk, TP 1,4R,
+    #              0,7R'de başabaş, en fazla 6 dk, 10x, tek pozisyon. Varsayılan (v4.6).
+    #              Geçmiş test (Mayıs–Kasım 2026, gerçek maliyetle) zarar: docs/SCALP_RAPORU.md.
+    #   breakout : 4 saatlik kanal kırılımı, stop = kasanın %1'i, tek hedef = kasanın %2'si (net).
     #   smc      : eski SMC/ICT pipeline (3m/5m/15m, TP1/TP2/TP3).
-    # Not: 1dk scalp kuralları ve 1s/15dk trend takibi geçmiş testte zarar etti (README, v4.3).
-    strategy: Literal["breakout", "smc"] = "breakout"
+    strategy: Literal["scalp", "breakout", "smc"] = "scalp"
+    # --- scalp (SMC_SC_*) — sayısal karşılığı olmayan şartname ifadeleri burada tanımlıdır
+    sc_symbols: str = "BTCUSDT,ETHUSDT"
+    sc_starting_equity: float = 200.0     # demo bakiyesi (SMC_STARTING_EQUITY yerine bu kullanılır)
+    sc_risk_usdt: float = 2.0             # her işlemde sabit risk; miktar = risk / stop mesafesi
+    sc_risk_tolerance: float = 0.10       # borsa miktar adımı nedeniyle risk 2 USDT'den en fazla ±%10 sapabilir
+    sc_leverage: int = 10
+    sc_ema_period: int = 20
+    sc_ema_min_dist_pct: float = 0.0005   # "EMA'ya çok yapışık": fiyat EMA'ya %0,05'ten yakın
+    sc_breakout_lookback: int = 6
+    sc_volume_lookback: int = 15
+    sc_volume_mult: float = 1.8
+    sc_min_body_ratio: float = 0.55
+    sc_rsi_period: int = 5
+    sc_rsi_long_max: float = 78.0
+    sc_rsi_short_min: float = 22.0
+    sc_stop_buffer_pct: float = 0.0001    # "kırılım mumunun hemen altı/üstü": %0,01 tampon
+    sc_max_stop_pct: float = 0.0038
+    sc_tp_r: float = 1.4
+    sc_be_r: float = 0.7
+    sc_max_hold_min: int = 6
+    sc_max_wick_ratio: float = 0.60       # "aşırı uzun fitil": tek fitil mum boyunun %60'ından uzun
+    sc_no_trade_start_min: int = 90       # 01:30 UTC
+    sc_no_trade_end_min: int = 330        # 05:30 UTC
+    sc_max_spread_pct: float = 0.0002     # "spread normalin üzerinde": BTC/ETH'de normal ~%0,001; %0,02 üstü
+    # Telegram bildirimleri (SMC_TELEGRAM_ENABLED). Kapalıyken mesajlar yalnız panele/DB'ye yazılır.
+    telegram_enabled: bool = False
     bo_tf: Literal["4h"] = "4h"
     bo_channel: int = 20              # önceki N adet 4s mumun tepesi/dibi
     bo_stop_atr: float = 3.0          # stop = kapanış -/+ K x ATR(14)
@@ -206,6 +234,25 @@ class Settings(BaseSettings):
             for key, value in ACTIVE_PROFILE.items():
                 if key not in self.model_fields_set:
                     setattr(self, key, value)
+        if self.strategy == "scalp":
+            # Şartname: sabit 2 USDT risk, tek TP (1,4R), 10x, aynı anda 1 pozisyon, günlük kayıp limiti ve
+            # ardışık stop beklemesi YOK, minimum RR şartı YOK. Sadece BTCUSDT ve ETHUSDT.
+            self.starting_equity = self.sc_starting_equity
+            self.max_leverage = self.sc_leverage
+            self.max_open_positions = 1
+            self.tp1_pct, self.tp2_pct, self.tp3_pct = 1.0, 0.0, 0.0
+            self.tp1_r = self.tp2_r = self.tp3_r = self.sc_tp_r
+            self.min_rr = -1e9
+            self.daily_loss_limit = 1.0
+            self.max_consecutive_sl = 10 ** 9
+            self.max_spread_pct = self.sc_max_spread_pct
+            self.symbol_whitelist = self.sc_symbols
+            self.max_stop_pct = self.sc_max_stop_pct
+            self.min_stop_pct = 0.0
+            self.risk_per_trade = self.sc_risk_usdt / max(self.starting_equity, 1e-9)  # yalnız gösterim
+            self.max_total_open_risk = max(self.max_total_open_risk, self.risk_per_trade)
+            self.entry_limit_offset_pct = 0.0003   # giriş: hemen dolacak limit (en fazla %0,03 kayma)
+            self.position_sync_interval_s = min(self.position_sync_interval_s, 1.0)  # 0,7R / 6 dk takibi
         if self.strategy == "breakout":
             # Bu stratejide risk ve hedef yapısı sabittir: %1 risk, tek hedef (TP1 = pozisyonun tamamı).
             # SMC_RISK_PER_TRADE (eski SMC ayarı) burada kullanılmaz; değiştirmek için SMC_BO_RISK_PER_TRADE.

@@ -41,6 +41,7 @@ from backend.smc.risk.engine import (Candidate, OpenPositionView, PortfolioState
                              daily_loss_breached, evaluate_trade)
 from backend.smc.strategy.orderflow import OpenInterestTracker
 from backend.smc.strategy.breakout import evaluate_breakout
+from backend.smc.strategy.scalp import ScalpParams, evaluate_scalp
 from backend.smc.strategy.signal import MarketContext, components_as_dicts, evaluate_symbol
 
 log = logging.getLogger("worker")
@@ -61,12 +62,16 @@ class TradingWorker:
         self.public = BinanceREST(s.public_data_rest_url, weight_per_min=1000)
         self.gw = BinanceGateway(self.rest, use_algo=s.use_algo_orders, working_type=s.sl_working_type,
                                  margin_type=s.margin_mode, attempts=s.order_retry_attempts)
-        self.notifier = TelegramNotifier(s.telegram_bot_token.get_secret_value(), s.telegram_chat_id, self.repo,
+        # Telegram yalnız SMC_TELEGRAM_ENABLED=true ise gönderir; kapalıyken mesajlar panele (DB) yazılır
+        self.notifier = TelegramNotifier(s.telegram_bot_token.get_secret_value() if s.telegram_enabled else "",
+                                         s.telegram_chat_id if s.telegram_enabled else "", self.repo,
                                          env_label=f"SMC·{s.trading_env.upper()}")
         self.candles = CandleStore()
         # breakout stratejisi 4s mumlarla çalışır; 3m/5m/15m korelasyon ve veri sağlığı için kalır
-        self.tfs: tuple[str, ...] = TFS + (("4h",) if s.strategy == "breakout" else ())
-        self.scan_tf = s.bo_tf if s.strategy == "breakout" else "3m"
+        # scalp: 1 dk giriş + 5 dk yön; 3m/15m veri sağlığı ve korelasyon için kalır
+        self.tfs: tuple[str, ...] = TFS + {"breakout": ("4h",), "scalp": ("1m",)}.get(s.strategy, ())
+        self.scan_tf = {"breakout": s.bo_tf, "scalp": "1m"}.get(s.strategy, "3m")
+        self.sc = ScalpParams.from_settings(s) if s.strategy == "scalp" else None
         self.oi = OpenInterestTracker()
         self.fng = FearGreedProvider(s.fng_url) if s.fng_enabled else None
         self.filters: dict[str, SymbolFilters] = {}
@@ -288,12 +293,13 @@ class TradingWorker:
             return
         report = await reconcile(self.gw, self.repo, self.tm)
         self._handle_reconcile(report, "startup")
+        await self._close_legacy_positions()
         await self.refresh_account()
         self._ready_flag = True
         self._refresh_status()
 
     # Strateji değişince işlem verisi bir kez temizlenir: sanal kasa starting_equity'den (100 USDT) başlar.
-    STRATEGY_TAG = {"breakout": "breakout-v1", "smc": "smc"}
+    STRATEGY_TAG = {"breakout": "breakout-v1", "smc": "smc", "scalp": "scalp-v1"}
     WIPE_TABLES = {"smc_market_snapshots", "smc_signal_components", "smc_signals", "smc_fills", "smc_orders",
                    "smc_trades", "smc_positions", "smc_pnl_snapshots", "smc_risk_events", "smc_system_events",
                    "smc_telegram_events", "smc_bot_commands", "smc_trial_state"}
@@ -320,10 +326,33 @@ class TradingWorker:
         self.repo.audit("worker", "strategy_reset", tag=tag)
         self.repo.system("INFO", "strategy_reset", f"Yeni strateji ({tag}): işlem geçmişi temizlendi, "
                                                     f"sanal kasa {self.s.starting_equity:g} USDT'den başlıyor")
+        if self.s.strategy == "scalp":
+            self.notifier.notify("STARTUP", f"Yeni strateji: BTC/ETH scalp (5dk EMA{self.s.sc_ema_period} yön, 1dk kırılım), "
+                                            f"işlem başı {self.s.sc_risk_usdt:g} USDT risk, TP {self.s.sc_tp_r:g}R, "
+                                            f"{self.s.sc_leverage}x. Sanal kasa {self.s.starting_equity:g} USDT.")
+            return
         self.notifier.notify("STARTUP", f"Yeni strateji: 4 saatlik kırılım, stop kasanın %{self.s.risk_per_trade * 100:g}'i, "
                                         f"hedef %{self.s.risk_per_trade * self.s.bo_target_r * 100:g}'i. "
                                         f"Sanal kasa {self.s.starting_equity:g} USDT'den başladı."
                              if self.s.strategy == "breakout" else f"Strateji: {tag}. Sanal kasa sıfırlandı.")
+
+    def _strategy_pending(self) -> bool:
+        tag = self.STRATEGY_TAG.get(self.s.strategy, self.s.strategy)
+        with self.db.session() as sess:
+            row = sess.scalar(select(BotConfig).where(BotConfig.key == "strategy_epoch"))
+            return row is None or (row.value or {}).get("tag") != tag
+
+    async def _close_legacy_positions(self) -> None:
+        """Strateji değişti ama eski stratejinin açık pozisyonları yüzünden sıfırlama yapılamadıysa: o pozisyonlar
+        piyasa emriyle kapatılır (yalnız SMC'nin kendi pozisyonları) ve yeni strateji temiz başlar."""
+        if not self._strategy_pending():
+            return
+        for pos in self.repo.open_positions():
+            try:
+                await self.tm.emergency_close(pos, "STRATEGY_CHANGE")
+            except Exception as exc:
+                self.repo.system("ERROR", "legacy_close_failed", repr(exc), position_id=pos.id)
+        self._reset_for_strategy()
 
     def _remove_trial_lock(self) -> None:
         """Deneme kilidi kapalıyken: eski trial kaydını ve 'expired' kilidini kaldır (bot süresiz çalışır)."""
@@ -519,6 +548,8 @@ class TradingWorker:
             self._manage_now.clear()
             try:
                 await self.tm.manage_all()
+                if self.sc is not None:
+                    await self.manage_scalp()
             except Exception as exc:
                 self.repo.system("ERROR", "manage_loop", repr(exc))
 
@@ -645,6 +676,9 @@ class TradingWorker:
         if self.s.strategy == "breakout":
             await self.scan_breakout(close_t)
             return
+        if self.s.strategy == "scalp":
+            await self.scan_scalp(close_t)
+            return
         open_syms = {p.symbol for p in self.repo.open_positions()}
         fg = self.fng.value if self.fng else None
         for sym in list(self.universe):
@@ -697,6 +731,34 @@ class TradingWorker:
                 opened += 1
         self.repo.system("INFO", "breakout_scan", f"4s tarama: {len(found)} kırılım, {opened} işlem açıldı",
                          candidates=len(found), opened=opened)
+
+    async def scan_scalp(self, close_t: int) -> None:
+        """Her 1 dk kapanışında BTCUSDT/ETHUSDT. Kırılım olan mum değerlendirilir ve panele sinyal olarak yazılır;
+        tüm kontroller geçerse ve açık pozisyon yoksa (en fazla 1) işlem açılır."""
+        if self.repo.open_positions():
+            return  # aynı anda en fazla 1 pozisyon: açıkken yeni sinyal aranmaz
+        for sym in list(self.universe):
+            if sym not in self.filters or sym in self.foreign_symbols:
+                continue
+            if any(self.candles.has_gap(sym, tf) or self.candles.is_stale(sym, tf, now_ms(), self.s.market_data_stale_factor)
+                   for tf in ("1m", "5m")):
+                continue
+            c1 = self.candles.get(sym, "1m", 60)
+            if not c1 or c1[-1].close_time < close_t - 1_000:
+                continue  # bu kapanışın mumu henüz gelmedi
+            ev = evaluate_scalp(sym, self.candles.get(sym, "5m", 100), c1, self.sc)
+            if ev is None:
+                continue
+            await self._handle_signal(ev, MarketContext(funding_rate=self.funding.get(sym)))
+            if self.repo.open_positions():
+                break
+
+    async def manage_scalp(self) -> None:
+        for pos in self.repo.open_positions():
+            try:
+                await self.tm.scalp_check(pos, self.marks.get(pos.symbol), self.candles.get(pos.symbol, "1m", 30), self.sc)
+            except Exception as exc:
+                self.repo.system("ERROR", "scalp_manage_error", repr(exc), position_id=pos.id)
 
     async def _handle_signal(self, ev, ctx: MarketContext) -> None:
         reason = ";".join(ev.reasons) or None

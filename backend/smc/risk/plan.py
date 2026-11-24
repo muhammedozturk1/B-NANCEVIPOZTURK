@@ -34,6 +34,9 @@ def net_target_price(side: Side, entry: float, stop: float, cfg: Settings, targe
 def tp_prices(side: Side, entry: float, stop: float, cfg: Settings) -> list[tuple[str, float, float]]:
     r = abs(entry - stop)
     s = side.sign
+    if getattr(cfg, "strategy", "smc") == "scalp":  # tek hedef: stop mesafesinin 1,4 katı (brüt)
+        px = entry + s * cfg.sc_tp_r * r
+        return [("TP1", cfg.sc_tp_r, px), ("TP2", cfg.sc_tp_r, px), ("TP3", cfg.sc_tp_r, px)]
     if getattr(cfg, "strategy", "smc") == "breakout":
         px = net_target_price(side, entry, stop, cfg, cfg.bo_target_r)
         rm = abs(px - entry) / r if r else 0.0
