@@ -191,9 +191,9 @@
     const used = s.day_pnl < 0 ? -s.day_pnl : 0;
     meter("#mDay", lim ? used / lim : 0, `${money(-used)} / ${money(-lim)}`);
     const st = settingsCache?.settings;
-    const maxdd = st ? st.max_drawdown_pct : 30;
+    const maxdd = s.dd_limit || (st ? st.max_drawdown_pct : 30);
     meter("#mDD", (s.risk.drawdown_pct || 0) / maxdd, `${pct(s.risk.drawdown_pct)} / ${pct(maxdd, 1)}`);
-    const maxp = st ? st.max_open_positions : 3;
+    const maxp = (s.limits && s.limits.max_open) || (st ? st.max_open_positions : 3);
     meter("#mPos", s.positions.length / maxp, `${s.positions.length} / ${maxp}`);
   }
 
@@ -211,7 +211,7 @@
     const p = v => Math.max(0, Math.min(100, ((v - lo) / span) * 100));
     const e = p(t.entry_price), tp1 = p(t.tp1), m = mark != null ? p(mark) : e;
     const sl = p(t.sl);
-    const tgt = trail ? "Hedef yok" : "TP2";
+    const tgt = t.strategy === "momentum" ? "Rebalance" : trail ? "Hedef yok" : "TP2";
     const leftLbl = L ? "Stop" : tgt, rightLbl = L ? tgt : "Stop";
     return `<div class="track" style="--e:${e}%">
       <div class="rail"></div>
@@ -248,11 +248,11 @@
           <div><span>Giriş</span><b>${price(t.entry_price)}</b></div>
           <div><span>Anlık</span><b>${price(t.mark)}</b></div>
           <div><span>Stop</span><b>${price(t.sl)}</b></div>
-          <div><span>Hedef</span><b>${t.tp2 == null ? "İz süren" : price(t.tp2)}</b></div>
+          <div><span>Hedef</span><b>${t.strategy === "momentum" ? "Rebalance" : t.tp2 == null ? "İz süren" : price(t.tp2)}</b></div>
           <div><span>Miktar</span><b>${qty(t.qty_open)}</b></div>
           <div><span>Teminat</span><b>${money(t.margin)}</b></div>
           <div><span>Risk</span><b>${money(t.risk_amount)}</b></div>
-          <div><span>${t.tp2 == null ? "İlk stop" : "Skor"}</span><b>${t.tp2 == null ? price(t.sl_initial) : sc(t.score)}</b></div>
+          <div><span>${t.strategy === "momentum" ? "Skor" : t.tp2 == null ? "İlk stop" : "Skor"}</span><b>${t.strategy === "momentum" ? (t.score == null ? "-" : (t.score > 0 ? "+" : "") + nf2.format(t.score)) : t.tp2 == null ? price(t.sl_initial) : sc(t.score)}</b></div>
         </div>
         <div class="pos-foot"><span class="muted small">${t.tp2 == null ? (t.sl !== t.sl_initial ? "Stop iz sürüyor" : "Açılış " + fmtTime(t.entry_time)) : t.tp1_hit ? "TP1 alındı, stop girişte" : "Açılış " + fmtTime(t.entry_time)}</span>
           <button class="btn small danger" data-close-trade="${t.id}">Pozisyonu kapat</button></div>

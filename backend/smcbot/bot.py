@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import random
 import socket
@@ -17,6 +18,7 @@ from .binance_client import BinanceError, BinanceREST
 from .brokers import LiveBroker, PaperBroker
 from .config import INTERVAL_MS
 from .market import MarketData
+from . import momentum as M
 from .momentum_runner import MomentumMixin
 from .risk import RiskGuard, compute_stats, correlation_block, log_returns, size_position
 from .strategy import SymbolAnalyzer, fmt_price
@@ -1033,6 +1035,7 @@ class Bot(MomentumMixin):
             self.save_settings({"running": False})
             db.delete_mode_data(self.mode)
             self.guard.reset()
+            db.kv_delete_prefix(f"mom:{self.mode}:")  # momentum zirvesi/günü/son rebalance da sıfırlanır
             if self.mode == "paper":
                 self.paper.reset()
             self.candidates.clear()
@@ -1132,7 +1135,8 @@ class Bot(MomentumMixin):
         positions = []
         for t in self.open_trades():
             u, ur = self.unrealized(t)
-            positions.append({**_slim(t), "mark": self.md.mark(t["symbol"]), "upnl": u, "upnl_r": ur})
+            positions.append({**_slim(t), "mark": self.md.mark(t["symbol"]), "upnl": u, "upnl_r": ur,
+                              "strategy": (t.get("meta") or {}).get("strategy") or (t.get("annotations") or {}).get("strategy")})
         pend = []
         for t in self.pending_trades():
             pend.append({**_slim(t), "mark": self.md.mark(t["symbol"]),
@@ -1140,18 +1144,31 @@ class Bot(MomentumMixin):
         g = self.guard.state()
         dsb = g["day_start_balance"] or bal
         day_pnl = self.guard.daily_pnl(self.now())
+        day_limit = -dsb * s["daily_loss_limit_pct"] / 100
+        dd_pct = ((g["peak_equity"] - eq) / g["peak_equity"] * 100) if g["peak_equity"] else 0.0
+        dd_limit = float(s["max_drawdown_pct"])
+        max_open = int(s["max_open_positions"])
+        if self.is_momentum():  # momentum kendi limitleriyle çalışır: günlük kayıp UTC gün başı equity'ye göre
+            ds = db.kv_get(self._mk("day")) or {}
+            start_eq = float(ds.get("equity") or eq)
+            day_pnl = eq - start_eq
+            day_limit = -start_eq * float(s.get("mom_daily_loss_pct", 3.0)) / 100
+            dd_pct = self.mom_drawdown_pct(eq)
+            dd_limit = float(s.get("mom_max_dd_pct", 10.0))
+            cfg = M.MomentumConfig.from_settings(s)
+            max_open = 2 * int(math.floor(len(cfg.universe) * cfg.top_frac + 1e-9))
         return {
             "mode": self.mode, "mode_tr": MODE_TR[self.mode], "running": s["running"], "sim": self.sim,
             "leader": self.is_leader, "strategy": s.get("strategy", "smc"), "fng": self.fng_value,
             "server_time": self.now(), "balance": bal, "equity": eq, "upnl": upnl,
-            "day_pnl": day_pnl, "day_limit": -dsb * s["daily_loss_limit_pct"] / 100,
+            "day_pnl": day_pnl, "day_limit": day_limit, "dd_limit": dd_limit,
             "start_balance": self.paper.start_balance() if self.mode == "paper" else None,
             "positions": positions, "pending": pend,
-            "limits": {"max_open": int(s["max_open_positions"]), "max_dir": int(s["max_same_direction"]),
+            "limits": {"max_open": max_open, "max_dir": int(s["max_same_direction"]),
                        "per_bar": int(s.get("trend_max_new_per_bar", 0) or 0)},
             "risk": {"halted": g["halted"], "halt_reason": g["halt_reason"], "cooldown_until": g["cooldown_until"],
                      "peak_equity": g["peak_equity"],
-                     "drawdown_pct": ((g["peak_equity"] - eq) / g["peak_equity"] * 100) if g["peak_equity"] else 0.0},
+                     "drawdown_pct": dd_pct},
             "scan": {**self.scan_info, "universe": len(self.md.universe), "ltf": self.scan_tf(),
                      "htf": "4h" if s.get("strategy") == "trend" else s["htf"]},
             "candidates": list(self.candidates)[:40],

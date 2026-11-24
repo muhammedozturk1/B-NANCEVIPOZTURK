@@ -272,3 +272,38 @@ def test_one_time_strategy_migration():
     db.save_settings({"strategy": "trend"})
     db._migrate_strategy_v45()                       # bir daha çalışmaz: kullanıcı seçimi korunur
     assert db.get_settings()["strategy"] == "trend"
+
+
+def test_reset_clears_momentum_state(monkeypatch):
+    paths = universe_paths()
+
+    async def scenario():
+        bot, sent = _setup_bot(monkeypatch, paths, mom_require_sign=False)
+        await bot.rebalance("test")
+        db.kv_set("mom:paper:peak", 500.0)               # eski, yüksek zirve
+        bot.is_leader = True
+        await bot.reset()
+        assert db.kv_get("mom:paper:peak") is None and db.kv_get("mom:paper:last_rebalance") is None
+        bal, eq, _ = await bot.equity()
+        await bot._momentum_risk(bal, eq, bot.now())
+        assert not bot.guard.state()["halted"]          # sıfırlama sonrası sahte drawdown kilidi yok
+        await bot.md.rest.close()
+
+    asyncio.run(scenario())
+
+
+def test_state_shows_momentum_limits(monkeypatch):
+    paths = universe_paths()
+
+    async def scenario():
+        bot, sent = _setup_bot(monkeypatch, paths, mom_require_sign=False)
+        await bot.rebalance("test")
+        bal, eq, _ = await bot.equity()
+        await bot._momentum_risk(bal, eq, bot.now())
+        st = await bot.state()
+        assert st["dd_limit"] == 10.0 and st["limits"]["max_open"] == 4
+        assert st["day_limit"] == pytest.approx(-eq * 0.03, rel=1e-3)
+        assert all(p["strategy"] == "momentum" for p in st["positions"])
+        await bot.md.rest.close()
+
+    asyncio.run(scenario())
