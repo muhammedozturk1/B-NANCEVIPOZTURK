@@ -36,6 +36,9 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 TELEGRAM_API_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 HEARTBEAT_INTERVAL_MINUTES = 30
+# "Worker çalışıyor" (30 dk'da bir) ve yönlü motorların haftalık özeti Telegram'a gitsin mi? Varsayılan: hayır.
+# Worker'ın canlılığı yine panelde (/health ve heartbeat) izlenir. Açmak için Render'da WORKER_TELEGRAM=true.
+WORKER_TELEGRAM = _env_bool("WORKER_TELEGRAM", False)
 WEEKLY_SUMMARY_DAY_OF_WEEK = "mon"
 WEEKLY_SUMMARY_HOUR_UTC = 9
 
