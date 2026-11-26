@@ -67,6 +67,7 @@ def init() -> None:
         _ready = True
     _migrate_risk_v441()
     _migrate_strategy_v45()
+    _migrate_partial_v461()
 
 
 def _migrate_strategy_v45() -> None:
@@ -83,6 +84,21 @@ def _migrate_strategy_v45() -> None:
             add_log("warn", f"Strateji '{old}' → 'momentum' (momentum portföy, v4.5). İlk rebalance birkaç sn içinde; "
                             "açık trend işlemleri kendi stoplarıyla kapanana kadar yönetilmeye devam eder.")
     kv_set("migr:strategy_v45", True)
+
+
+def _migrate_partial_v461() -> None:
+    """Bir kerelik (v4.6.1, kullanıcı isteği): trend işlemlerinde +1R'de pozisyonun yarısı kapanır (risk %10'da ≈ 5$),
+    +2R'de stop girişe çekilir, kalan yarı swing iz süren stopla devam eder. Tetik: mark fiyatı (anlık).
+    Geçmiş test (2020–2026): getiri %196 / en büyük düşüş %15 (kâr almasız: %338 / %19). Panelden değiştirilebilir."""
+    if kv_get("migr:partial_v461"):
+        return
+    stored = kv_get("settings", None)
+    if stored:
+        stored.update({"partial_tp_tiers": "1.0:0.5", "lock_tiers": "2.0:0", "exit_trigger_source": "mark_price"})
+        kv_set("settings", stored)
+        add_log("warn", "Kâr alma eklendi (v4.6.1): +1R'de yarısı kapanır, +2R'de stop girişe, kalan iz süren stopla. "
+                        "Açık işlemlere de uygulanır.")
+    kv_set("migr:partial_v461", True)
 
 
 RISK_TESTED = {"risk_per_trade_pct": 1.0, "max_open_positions": 3, "max_same_direction": 2, "daily_loss_limit_pct": 10.0}
