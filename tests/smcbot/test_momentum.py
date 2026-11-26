@@ -307,3 +307,16 @@ def test_state_shows_momentum_limits(monkeypatch):
         await bot.md.rest.close()
 
     asyncio.run(scenario())
+
+
+def test_one_time_partial_profit_migration():
+    db.kv_set("settings", {"strategy": "trend", "risk_per_trade_pct": 10.0, "lock_tiers": "2.0:0",
+                           "partial_tp_tiers": "", "exit_trigger_source": "candle_close"})
+    db.kv_set("migr:partial_v461", None)
+    db._migrate_partial_v461()
+    st = db.get_settings()
+    assert (st["partial_tp_tiers"], st["lock_tiers"], st["exit_trigger_source"]) == ("1.0:0.5", "2.0:0", "mark_price")
+    assert st["risk_per_trade_pct"] == 10.0 and st["strategy"] == "trend"   # kullanıcı seçimleri korunur
+    db.save_settings({"partial_tp_tiers": ""})
+    db._migrate_partial_v461()                                              # bir daha çalışmaz
+    assert db.get_settings()["partial_tp_tiers"] == ""
