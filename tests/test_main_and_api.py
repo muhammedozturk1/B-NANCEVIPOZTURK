@@ -81,3 +81,19 @@ def test_dashboard_requires_login_and_health_is_public():
         assert risk["risk_per_trade"] == 0.01 and risk["strategy"] == "scalp"
         assert "/smc/" in c.get("/").text  # SMC Bot panelinde SMC Scalper linki
         assert c.get("/api/state").status_code == 503  # testlerde SMC Bot kapalı (SMCBOT_ENABLED=false)
+
+
+def test_worker_heartbeat_not_sent_to_telegram_by_default(monkeypatch):
+    """Kullanıcı isteği: 30 dk'lık 'Worker çalışıyor' mesajı Telegram'a gitmez; canlılık kaydı yine tutulur."""
+    from backend import config as cfg, main
+    sent, beats = [], []
+    monkeypatch.setattr(main.notifier, "send_heartbeat", lambda: sent.append(1))
+    monkeypatch.setattr(main.notifier, "send_weekly_summary", lambda: sent.append(2))
+    monkeypatch.setattr(main.bot_status, "beat", lambda: beats.append(1))
+    assert cfg.WORKER_TELEGRAM is False
+    main.run_heartbeat_safely()
+    main.run_weekly_summary_safely()
+    assert sent == [] and beats == [1]
+    monkeypatch.setattr(cfg, "WORKER_TELEGRAM", True)
+    main.run_heartbeat_safely()
+    assert sent == [1]

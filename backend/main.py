@@ -47,13 +47,16 @@ def run_position_monitor_safely(client):
 
 def run_heartbeat_safely():
     try:
-        bot_status.beat()
-        notifier.send_heartbeat()
+        bot_status.beat()  # panel için canlılık kaydı her zaman
+        if config.WORKER_TELEGRAM:
+            notifier.send_heartbeat()
     except Exception as e:
         logger.error(f"Heartbeat gönderilirken hata: {e}")
 
 
 def run_weekly_summary_safely():
+    if not config.WORKER_TELEGRAM:
+        return
     try:
         notifier.send_weekly_summary()
     except Exception as e:
@@ -104,7 +107,8 @@ def startup_checks():
 
     bot_status.beat()
     logger.info("=== KONTROLLER TAMAMLANDI, BOT ÇALIŞMAYA BAŞLIYOR ===")
-    notifier.send_heartbeat()
+    if config.WORKER_TELEGRAM:
+        notifier.send_heartbeat()
     return client
 
 
